@@ -1,0 +1,32 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: iot-cold-chain-backend-minimal
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/iot_cold_chain}
+    username: ${DB_USERNAME:coldchain}
+    password: ${DB_PASSWORD:coldchain123}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+app:
+  security:
+    api-key-pepper: ${API_KEY_PEPPER:change-this-secret-in-real-env}
+    timestamp-skew-seconds: ${TIMESTAMP_SKEW_SECONDS:300}
+    default-signature-algorithm: ${DEFAULT_SIGNATURE_ALGORITHM:SHA256withECDSA}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

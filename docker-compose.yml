@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: coldchain-postgres
+    environment:
+      POSTGRES_DB: iot_cold_chain
+      POSTGRES_USER: coldchain
+      POSTGRES_PASSWORD: coldchain123
+    ports:
+      - "5432:5432"
+    volumes:
+      - coldchain_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coldchain -d iot_cold_chain"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4:8
+    container_name: coldchain-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@coldchain.local
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - coldchain_pgadmin:/var/lib/pgadmin
+
+volumes:
+  coldchain_pgdata:
+  coldchain_pgadmin:
