@@ -13,4 +13,6 @@ public interface VerifyCodeRepository extends JpaRepository<VerifyCode, String> 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select v from VerifyCode v where v.verifyCode = :verifyCode")
     Optional<VerifyCode> findForUpdate(@Param("verifyCode") String verifyCode);
+
+    long countByStatus(com.example.coldchain.entity.enums.VerifyCodeStatus status);
 }

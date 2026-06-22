@@ -4,4 +4,5 @@ import com.example.coldchain.entity.Device;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface DeviceRepository extends JpaRepository<Device, String> {
+    long countByStatus(com.example.coldchain.entity.enums.DeviceStatus status);
 }

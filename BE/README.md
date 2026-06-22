@@ -17,6 +17,7 @@ Bản này cố tình giữ scope gọn: **4 API chính**, nhưng logic bên tro
 
 ## API chính
 
+**API cho thiết bị IoT:**
 ```text
 POST /api/devices/verify
 POST /api/telemetry
@@ -24,7 +25,14 @@ GET  /api/shipments/{shipmentCode}/telemetry
 GET  /api/shipments/{shipmentCode}/alerts
 ```
 
-Không có admin API trong bản này. Shipment và verify code được seed sẵn bằng Flyway để demo gọn.
+**API cho Admin Web Dashboard:**
+```text
+GET  /api/admin/devices
+GET  /api/admin/shipments
+POST /api/admin/shipments
+POST /api/admin/devices/generate-code
+GET  /api/admin/dashboard/stats
+```
 
 ## Chạy PostgreSQL + pgAdmin
 
