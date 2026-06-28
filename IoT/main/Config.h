@@ -3,50 +3,46 @@
 
 #include <Arduino.h>
 
-// Phần cứng cảm biến
+// Phan cung cam bien
 #define DHTPIN            15
 #define DHTTYPE           DHT22
-#define GPS_RX_PIN        16  
-#define GPS_TX_PIN        17  
-#define BATTERY_ADC_PIN   34  
+#define GPS_RX_PIN        16
+#define GPS_TX_PIN        17
+#define BATTERY_ADC_PIN   34
 
-// Bật/tắt theo phần cứng thật hiện có.
-// Bạn nói hiện chưa có GPS/BLE/Battery, để false để chạy mô phỏng an toàn.
+// Bat/tat theo phan cung that hien co.
 #define USE_GPS_SENSOR      false
 #define USE_BLE_SCANNER     false
 #define USE_BATTERY_SENSOR  false
 #define USE_DHT_SENSOR      true
 
-// MAC beacon BLE mục tiêu để đọc RSSI.
-// Để "" nếu muốn lấy RSSI mạnh nhất từ mọi beacon lân cận.
+// MAC beacon BLE muc tieu de doc RSSI.
 static const char* BLE_TARGET_MAC = "";
 
-// Chu kỳ gửi telemetry
+// Chu ky gui telemetry
 static const uint32_t TELEMETRY_INTERVAL_MS = 10000;
 
-// API endpoint (đổi thành backend thật của bạn)
+// API endpoint (doi thanh backend that cua ban)
 static const char* SERVER_VERIFY_URL    = "http://192.168.1.5:8080/api/devices/verify";
 static const char* SERVER_TELEMETRY_URL = "http://192.168.1.5:8080/api/telemetry";
 
-// Provisioning placeholder mode:
-// - Khi chưa có backend verify thật: đặt false để tự cấp api_key giả lập trên thiết bị.
-// - Khi backend sẵn sàng: đặt true để gọi SERVER_VERIFY_URL và dùng verify_code.
+// Provisioning placeholder mode
 static const bool ENABLE_SERVER_VERIFY = true;
 
-// NTP để lấy epoch seconds phục vụ X-Timestamp.
+// NTP de lay epoch seconds phuc vu X-Timestamp.
 static const char* NTP_SERVER_1 = "pool.ntp.org";
 static const char* NTP_SERVER_2 = "time.google.com";
 static const long UTC_OFFSET_SECONDS = 7 * 3600;
 static const int DST_OFFSET_SECONDS = 0;
 
-// Fallback shipment khi backend verify chưa trả shipment_code.
+// Fallback shipment khi backend verify chua tra shipment_code.
 static const char* DEFAULT_SHIPMENT_CODE = "SHIP-123";
 
-// Wi-Fi AP khi provisioning lần đầu
+// Wi-Fi AP khi provisioning lan dau
 static const char* AP_SSID = "ESP32-IoT-Setup";
 static const char* AP_PASS = "";
 
-// Dung lượng chuỗi cố định để lưu NVS
+// Dung luong chuoi co dinh de luu NVS
 static const size_t WIFI_SSID_MAX    = 32;
 static const size_t WIFI_PASS_MAX    = 64;
 static const size_t VERIFY_CODE_MAX  = 64;
@@ -54,7 +50,7 @@ static const size_t API_KEY_MAX      = 128;
 static const size_t DEVICE_ID_MAX    = 32;
 static const size_t SHIPMENT_CODE_MAX = 64;
 
-// Cấu trúc lưu trữ NVS (flash) cho thông tin provisioning
+// Cau truc luu tru NVS (flash) cho thong tin provisioning
 struct DeviceCredentials {
   uint32_t magic;
   char wifi_ssid[WIFI_SSID_MAX + 1];

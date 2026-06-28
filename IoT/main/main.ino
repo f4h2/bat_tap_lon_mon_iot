@@ -8,12 +8,15 @@
 #include <Preferences.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <time.h>
 
 #include "mbedtls/md.h"
 #include "mbedtls/ecp.h"
 #include "mbedtls/ecdsa.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
+#include "mbedtls/pk.h"
+#include "mbedtls/base64.h"
 
 #include "Config.h"
 #include "WebPortal.h"
@@ -121,6 +124,21 @@ static bool connectToWiFi(const char* ssid, const char* pass) {
     g_wifi_connected = true;
     Serial.print("\n[Wi-Fi] Thanh cong. IP: ");
     Serial.println(WiFi.localIP());
+
+    configTime(UTC_OFFSET_SECONDS, DST_OFFSET_SECONDS, NTP_SERVER_1, NTP_SERVER_2);
+    time_t now = time(nullptr);
+    int retry = 0;
+    while (now < 1700000000 && retry < 20) {
+      delay(300);
+      now = time(nullptr);
+      retry++;
+    }
+    if (now >= 1700000000) {
+      Serial.print("[NTP] Epoch synced: ");
+      Serial.println((uint32_t)now);
+    } else {
+      Serial.println("[NTP] Chua dong bo duoc thoi gian.");
+    }
     return true;
   }
 
@@ -129,12 +147,14 @@ static bool connectToWiFi(const char* ssid, const char* pass) {
   return false;
 }
 
-static bool generateECCKeyPair(uint8_t* out_priv, String& out_pub_hex) {
+static bool generateECCKeyPair(uint8_t* out_priv, String& out_pub_pem) {
   mbedtls_ecp_keypair ec;
+  mbedtls_pk_context pk;
   mbedtls_entropy_context entropy;
   mbedtls_ctr_drbg_context ctr_drbg;
 
   mbedtls_ecp_keypair_init(&ec);
+  mbedtls_pk_init(&pk);
   mbedtls_entropy_init(&entropy);
   mbedtls_ctr_drbg_init(&ctr_drbg);
 
@@ -143,6 +163,7 @@ static bool generateECCKeyPair(uint8_t* out_priv, String& out_pub_hex) {
                                  (const unsigned char*)pers, strlen(pers));
   if (rc != 0) {
     mbedtls_ecp_keypair_free(&ec);
+    mbedtls_pk_free(&pk);
     mbedtls_entropy_free(&entropy);
     mbedtls_ctr_drbg_free(&ctr_drbg);
     return false;
@@ -151,6 +172,7 @@ static bool generateECCKeyPair(uint8_t* out_priv, String& out_pub_hex) {
   rc = mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1, &ec, mbedtls_ctr_drbg_random, &ctr_drbg);
   if (rc != 0) {
     mbedtls_ecp_keypair_free(&ec);
+    mbedtls_pk_free(&pk);
     mbedtls_entropy_free(&entropy);
     mbedtls_ctr_drbg_free(&ctr_drbg);
     return false;
@@ -158,27 +180,42 @@ static bool generateECCKeyPair(uint8_t* out_priv, String& out_pub_hex) {
 
   mbedtls_mpi_write_binary(&ec.d, out_priv, 32);
 
-  uint8_t pub_buf[65];
-  size_t pub_len = 0;
-  rc = mbedtls_ecp_point_write_binary(&ec.grp, &ec.Q, MBEDTLS_ECP_PF_UNCOMPRESSED,
-                                      &pub_len, pub_buf, sizeof(pub_buf));
-  if (rc != 0 || pub_len == 0) {
+  rc = mbedtls_pk_setup(&pk, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY));
+  if (rc != 0) {
     mbedtls_ecp_keypair_free(&ec);
+    mbedtls_pk_free(&pk);
     mbedtls_entropy_free(&entropy);
     mbedtls_ctr_drbg_free(&ctr_drbg);
     return false;
   }
 
-  out_pub_hex = "";
-  out_pub_hex.reserve(pub_len * 2);
-  for (size_t i = 0; i < pub_len; i++) {
-    if (pub_buf[i] < 0x10) {
-      out_pub_hex += "0";
-    }
-    out_pub_hex += String(pub_buf[i], HEX);
+  mbedtls_ecp_keypair* pk_ec = mbedtls_pk_ec(pk);
+  rc = mbedtls_ecp_group_copy(&pk_ec->grp, &ec.grp);
+  rc |= mbedtls_mpi_copy(&pk_ec->d, &ec.d);
+  rc |= mbedtls_ecp_copy(&pk_ec->Q, &ec.Q);
+  if (rc != 0) {
+    mbedtls_ecp_keypair_free(&ec);
+    mbedtls_pk_free(&pk);
+    mbedtls_entropy_free(&entropy);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    return false;
   }
 
+  unsigned char pem_buf[512];
+  memset(pem_buf, 0, sizeof(pem_buf));
+  rc = mbedtls_pk_write_pubkey_pem(&pk, pem_buf, sizeof(pem_buf));
+  if (rc != 0) {
+    mbedtls_ecp_keypair_free(&ec);
+    mbedtls_pk_free(&pk);
+    mbedtls_entropy_free(&entropy);
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    return false;
+  }
+
+  out_pub_pem = String((const char*)pem_buf);
+
   mbedtls_ecp_keypair_free(&ec);
+  mbedtls_pk_free(&pk);
   mbedtls_entropy_free(&entropy);
   mbedtls_ctr_drbg_free(&ctr_drbg);
   return true;
@@ -205,7 +242,7 @@ static String sha256Hex(const String& input) {
   return out;
 }
 
-static String signWithPrivateKey(const String& data, const uint8_t* priv_key) {
+static bool signWithPrivateKeyBase64(const String& data, const uint8_t* priv_key, String& out_sig_b64) {
   uint8_t hash[32];
   mbedtls_md_context_t ctx;
   mbedtls_md_init(&ctx);
@@ -227,24 +264,22 @@ static String signWithPrivateKey(const String& data, const uint8_t* priv_key) {
   mbedtls_mpi_init(&s);
 
   const char* pers = "esp32-sign";
-  mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                        (const unsigned char*)pers, strlen(pers));
-  mbedtls_ecp_group_load(&ecdsa.grp, MBEDTLS_ECP_DP_SECP256R1);
-  mbedtls_mpi_read_binary(&ecdsa.d, priv_key, 32);
-  mbedtls_ecdsa_sign(&ecdsa.grp, &r, &s, &ecdsa.d, hash, 32,
-                     mbedtls_ctr_drbg_random, &ctr_drbg);
+  int rc = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+                                 (const unsigned char*)pers, strlen(pers));
+  rc |= mbedtls_ecp_group_load(&ecdsa.grp, MBEDTLS_ECP_DP_SECP256R1);
+  rc |= mbedtls_mpi_read_binary(&ecdsa.d, priv_key, 32);
 
-  uint8_t sig_buf[64];
-  mbedtls_mpi_write_binary(&r, sig_buf, 32);
-  mbedtls_mpi_write_binary(&s, sig_buf + 32, 32);
+  unsigned char der_sig[128];
+  size_t der_len = 0;
+  if (rc == 0) {
+    rc = mbedtls_ecdsa_write_signature(&ecdsa, MBEDTLS_MD_SHA256, hash, sizeof(hash),
+                                       der_sig, &der_len, mbedtls_ctr_drbg_random, &ctr_drbg);
+  }
 
-  String sig_hex;
-  sig_hex.reserve(128);
-  for (int i = 0; i < 64; i++) {
-    if (sig_buf[i] < 0x10) {
-      sig_hex += "0";
-    }
-    sig_hex += String(sig_buf[i], HEX);
+  unsigned char b64_sig[192];
+  size_t b64_len = 0;
+  if (rc == 0) {
+    rc = mbedtls_base64_encode(b64_sig, sizeof(b64_sig), &b64_len, der_sig, der_len);
   }
 
   mbedtls_ecdsa_free(&ecdsa);
@@ -253,7 +288,13 @@ static String signWithPrivateKey(const String& data, const uint8_t* priv_key) {
   mbedtls_mpi_free(&r);
   mbedtls_mpi_free(&s);
 
-  return sig_hex;
+  if (rc != 0) {
+    return false;
+  }
+
+  b64_sig[b64_len] = '\0';
+  out_sig_b64 = String((const char*)b64_sig);
+  return true;
 }
 
 static String randomNonceHex() {
@@ -264,23 +305,24 @@ static String randomNonceHex() {
   return String(buf);
 }
 
-static void assignPlaceholderApiKey(const String& publicKeyHex) {
+static void assignPlaceholderApiKey(const String& publicKeyPem) {
   // Placeholder api_key dùng khi chưa có backend verify.
-  String seed = device_id + "." + publicKeyHex + "." + randomNonceHex();
+  String seed = device_id + "." + publicKeyPem + "." + randomNonceHex();
   String h = sha256Hex(seed);
   String apiKey = "demo_" + h.substring(0, 48);
   safeCopyChars(credentials.api_key, sizeof(credentials.api_key), apiKey);
+  safeCopyChars(credentials.shipment_code, sizeof(credentials.shipment_code), DEFAULT_SHIPMENT_CODE);
 }
 
-static bool callAPIVerify(const String& publicKeyHex) {
+static bool callAPIVerify(const String& publicKeyPem) {
   if (!ENABLE_SERVER_VERIFY) {
-    assignPlaceholderApiKey(publicKeyHex);
+    assignPlaceholderApiKey(publicKeyPem);
     Serial.println("[VERIFY] ENABLE_SERVER_VERIFY=false, su dung api_key gia lap.");
     return true;
   }
 
   if (strlen(SERVER_VERIFY_URL) == 0) {
-    assignPlaceholderApiKey(publicKeyHex);
+    assignPlaceholderApiKey(publicKeyPem);
     Serial.println("[VERIFY] SERVER_VERIFY_URL rong, su dung api_key gia lap.");
     return true;
   }
@@ -296,7 +338,7 @@ static bool callAPIVerify(const String& publicKeyHex) {
   StaticJsonDocument<512> doc;
   doc["device_id"] = device_id;
   doc["verify_code"] = credentials.verify_code;
-  doc["public_key"] = publicKeyHex;
+  doc["public_key"] = publicKeyPem;
 
   String body;
   serializeJson(doc, body);
@@ -310,6 +352,11 @@ static bool callAPIVerify(const String& publicKeyHex) {
     StaticJsonDocument<384> respDoc;
     if (deserializeJson(respDoc, resp) == DeserializationError::Ok && respDoc["api_key"]) {
       safeCopyChars(credentials.api_key, sizeof(credentials.api_key), (const char*)respDoc["api_key"]);
+      if (respDoc["shipment_code"]) {
+        safeCopyChars(credentials.shipment_code, sizeof(credentials.shipment_code), (const char*)respDoc["shipment_code"]);
+      } else {
+        safeCopyChars(credentials.shipment_code, sizeof(credentials.shipment_code), DEFAULT_SHIPMENT_CODE);
+      }
       ok = true;
     }
   } else {
@@ -411,42 +458,35 @@ static bool sendTelemetryPayload(const SensorSnapshot& sensor) {
     return false;
   }
 
-  uint32_t ts = millis();
+  time_t now = time(nullptr);
+  if (now < 1700000000) {
+    Serial.println("[TELEMETRY] Epoch chua hop le. Bo qua lan gui nay.");
+    return false;
+  }
+  uint32_t ts = (uint32_t)now;
   String nonce = randomNonceHex();
 
-  StaticJsonDocument<640> telemetry;
-  telemetry["device_id"] = device_id;
-  telemetry["timestamp_ms"] = ts;
-  telemetry["temperature_c"] = sensor.temperature;
-  telemetry["humidity_pct"] = sensor.humidity;
-  telemetry["ble_rssi"] = sensor.ble_rssi;
-  telemetry["gps_lat"] = sensor.gps_lat;
-  telemetry["gps_lng"] = sensor.gps_lng;
-  telemetry["gps_valid"] = sensor.gps_valid;
-  telemetry["battery_v"] = sensor.battery_v;
-  telemetry["sim_temp_hum"] = sensor.sim_temp_hum;
-  telemetry["sim_ble"] = sensor.sim_ble;
-  telemetry["sim_gps"] = sensor.sim_gps;
-  telemetry["sim_battery"] = sensor.sim_battery;
+  StaticJsonDocument<384> telemetry;
+  telemetry["shipment_code"] = strlen(credentials.shipment_code) > 0 ? credentials.shipment_code : DEFAULT_SHIPMENT_CODE;
+  telemetry["temperature"] = sensor.temperature;
+  telemetry["humidity"] = sensor.humidity;
+  telemetry["rssi"] = sensor.ble_rssi;
+  telemetry["lat"] = sensor.gps_lat;
+  telemetry["lng"] = sensor.gps_lng;
+  int batteryPct = (int)constrain(((sensor.battery_v - 3.3f) / (4.2f - 3.3f)) * 100.0f, 0.0f, 100.0f);
+  telemetry["battery"] = batteryPct;
 
   String telemetryPayload;
   serializeJson(telemetry, telemetryPayload);
 
   String payloadHash = sha256Hex(telemetryPayload);
-  String signingBase = device_id + "." + String(ts) + "." + nonce + "." + payloadHash;
-  String signatureHex = signWithPrivateKey(signingBase, credentials.private_key_raw);
-
-  StaticJsonDocument<1024> envelope;
-  envelope["device_id"] = device_id;
-  envelope["timestamp_ms"] = ts;
-  envelope["nonce"] = nonce;
-  envelope["payload_hash"] = payloadHash;
-  envelope["signature"] = signatureHex;
-  envelope["signature_alg"] = "ECDSA_P256_SHA256";
-  envelope["telemetry"] = serialized(telemetryPayload);
-
-  String requestBody;
-  serializeJson(envelope, requestBody);
+  String canonicalRequest = "POST\n/api/telemetry\n" + device_id + "\n" + String(ts) + "\n" + nonce + "\n" + payloadHash;
+  String signatureB64;
+  if (!signWithPrivateKeyBase64(canonicalRequest, credentials.private_key_raw, signatureB64)) {
+    Serial.println("[TELEMETRY] Khong tao duoc signature Base64.");
+    g_telemetry_sent_fail++;
+    return false;
+  }
 
   HTTPClient http;
   http.begin(SERVER_TELEMETRY_URL);
@@ -455,10 +495,9 @@ static bool sendTelemetryPayload(const SensorSnapshot& sensor) {
   http.addHeader("x-device-id", device_id);
   http.addHeader("x-timestamp", String(ts));
   http.addHeader("x-nonce", nonce);
-  http.addHeader("x-signature", signatureHex);
-  http.addHeader("x-signature-alg", "ECDSA_P256_SHA256");
+  http.addHeader("x-signature", signatureB64);
 
-  int code = http.POST(requestBody);
+  int code = http.POST(telemetryPayload);
   g_last_telemetry_http = code;
   if (code > 0 && code < 300) {
     g_telemetry_sent_ok++;
@@ -491,14 +530,14 @@ static bool runProvisioningFlow() {
     return false;
   }
 
-  String pubKeyHex;
-  if (!generateECCKeyPair(credentials.private_key_raw, pubKeyHex)) {
+  String pubKeyPem;
+  if (!generateECCKeyPair(credentials.private_key_raw, pubKeyPem)) {
     Serial.println("[PROVISION] Tao key pair that bai.");
     return false;
   }
 
   Serial.println("[PROVISION] Dang xu ly verify de nhan x-api-key...");
-  if (!callAPIVerify(pubKeyHex)) {
+  if (!callAPIVerify(pubKeyPem)) {
     Serial.println("[PROVISION] Verify that bai. Kiem tra verify_code hoac backend.");
     return false;
   }
