@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cold Chain · Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet" href="/css/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-logo">❄</div>
+        <div>
+          <div class="brand-title">Cold Chain</div>
+          <div class="brand-sub">Admin Dashboard</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a class="nav-item" data-route="overview" href="#/overview">
+          <span class="nav-ico">▦</span> Tổng quan
+        </a>
+        <a class="nav-item" data-route="shipments" href="#/shipments">
+          <span class="nav-ico">▣</span> Chuyến hàng
+        </a>
+        <a class="nav-item" data-route="codes" href="#/codes">
+          <span class="nav-ico">⌗</span> Mã kích hoạt
+        </a>
+        <a class="nav-item" data-route="devices" href="#/devices">
+          <span class="nav-ico">▤</span> Thiết bị
+        </a>
+        <a class="nav-item" data-route="monitor" href="#/monitor">
+          <span class="nav-ico">◔</span> Giám sát
+        </a>
+      </nav>
+
+      <div class="sidebar-foot">
+        <div class="be-status" id="beStatus">
+          <span class="dot dot-idle"></span><span id="beStatusText">Đang kiểm tra...</span>
+        </div>
+        <a class="swagger-link" href="/swagger-ui.html" target="_blank" rel="noopener">Swagger API ↗</a>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="pageTitle">Tổng quan</h1>
+          <p class="page-sub" id="pageSub">Số liệu tổng hợp toàn hệ thống chuỗi lạnh.</p>
+        </div>
+        <button class="btn btn-ghost" id="refreshBtn" title="Tải lại dữ liệu">⟳ Làm mới</button>
+      </header>
+
+      <section class="content" id="view"></section>
+    </main>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

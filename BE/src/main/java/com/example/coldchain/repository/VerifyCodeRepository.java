@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 public interface VerifyCodeRepository extends JpaRepository<VerifyCode, String> {
@@ -15,4 +16,6 @@ public interface VerifyCodeRepository extends JpaRepository<VerifyCode, String> 
     Optional<VerifyCode> findForUpdate(@Param("verifyCode") String verifyCode);
 
     long countByStatus(com.example.coldchain.entity.enums.VerifyCodeStatus status);
+
+    List<VerifyCode> findAllByOrderByCreatedAtDesc();
 }

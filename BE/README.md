@@ -44,7 +44,7 @@ pgAdmin:
 
 ```text
 URL:      http://localhost:5050
-Email:    admin@coldchain.local
+Email:    admin@coldchain.com
 Password: admin123
 ```
 

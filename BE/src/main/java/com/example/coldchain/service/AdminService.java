@@ -58,6 +58,10 @@ public class AdminService {
         return shipmentRepository.findAll();
     }
 
+    public List<VerifyCode> getVerifyCodes() {
+        return verifyCodeRepository.findAllByOrderByCreatedAtDesc();
+    }
+
     @Transactional
     public Shipment createShipment(CreateShipmentRequest request) {
         if (shipmentRepository.existsById(request.shipmentCode())) {

@@ -38,6 +38,11 @@ public class AdminController {
         return ResponseEntity.ok(adminService.createShipment(request));
     }
 
+    @GetMapping("/verify-codes")
+    public ResponseEntity<List<VerifyCode>> getVerifyCodes() {
+        return ResponseEntity.ok(adminService.getVerifyCodes());
+    }
+
     @PostMapping("/devices/generate-code")
     public ResponseEntity<VerifyCode> generateVerifyCode(@Valid @RequestBody GenerateVerifyCodeRequest request) {
         return ResponseEntity.ok(adminService.generateVerifyCode(request));
