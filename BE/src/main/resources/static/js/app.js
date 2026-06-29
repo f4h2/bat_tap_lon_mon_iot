@@ -69,6 +69,24 @@
     return parts.filter(Boolean).join(" ").toLowerCase().includes(q);
   }
 
+  // Diễn giải mã lỗi toàn vẹn (tamper) sang tiếng Việt cho tooltip.
+  const TAMPER_LABELS = {
+    PAYLOAD_HASH_MISMATCH: "payload_hash ≠ SHA256(raw_payload)",
+    RECORD_HASH_MISMATCH: "record_hash tính lại không khớp",
+    CHAIN_BROKEN: "Liên kết hash chain bị đứt (bản ghi trước bị sửa/xoá)",
+    CANONICAL_MISMATCH: "Canonical request không khớp các trường",
+    SIGNATURE_INVALID: "Chữ ký số ECDSA không hợp lệ",
+    DEVICE_MISSING: "Không tìm thấy thiết bị để xác thực chữ ký",
+    PAYLOAD_UNPARSEABLE: "raw_payload không đọc được (JSON hỏng)",
+  };
+  function tamperLabel(code) {
+    if (code.indexOf("COLUMN_MISMATCH:") === 0) return "Cột '" + code.split(":")[1] + "' khác giá trị trong raw_payload";
+    return TAMPER_LABELS[code] || code;
+  }
+  function tamperTitle(issues) {
+    return "Phát hiện sửa đổi:\n• " + (issues || []).map(tamperLabel).join("\n• ");
+  }
+
   /* Các điểm chủ quyền Việt Nam ghi đè lên bản đồ (OSM thiếu nhãn 2 quần đảo này). */
   const VN_ISLANDS = [
     { name: "Quần đảo Hoàng Sa (Việt Nam)", lat: 16.5, lng: 112.0 },
@@ -179,6 +197,14 @@
       ctx.setLineDash([]);
     }
 
+    // vạch dọc đỏ tại các điểm bị sửa đổi (tamper) — vẽ trước để nằm dưới đường
+    points.forEach((p, i) => {
+      if (p.bad) {
+        ctx.strokeStyle = "rgba(197,48,48,.18)"; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.moveTo(x(i), padT); ctx.lineTo(x(i), padT + plotH); ctx.stroke();
+      }
+    });
+
     // line độ ẩm
     drawLine(ctx, points, x, yH, (p) => p.h, "#1f6feb");
     // line nhiệt độ (vẽ sau để nổi)
@@ -192,6 +218,14 @@
         }
       });
     }
+
+    // điểm bị sửa đổi -> vòng tròn rỗng đỏ trên cả 2 đường
+    points.forEach((p, i) => {
+      if (!p.bad) return;
+      ctx.strokeStyle = "#c53030"; ctx.lineWidth = 2;
+      if (p.t != null) { ctx.beginPath(); ctx.arc(x(i), yT(p.t), 6, 0, Math.PI * 2); ctx.stroke(); }
+      if (p.h != null) { ctx.beginPath(); ctx.arc(x(i), yH(p.h), 6, 0, Math.PI * 2); ctx.stroke(); }
+    });
   }
   function drawLine(ctx, points, x, y, pick, color) {
     ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = "round";
@@ -620,13 +654,14 @@
     const band = (ship.minTemperature != null && ship.maxTemperature != null)
       ? { min: Number(ship.minTemperature), max: Number(ship.maxTemperature) } : null;
 
+    const warnHost = h("div");
     const metricsHost = h("div", { class: "metric-row" });
 
     const chartCanvas = h("canvas");
     const chartPanel = h("div", { class: "panel", style: "margin-top:16px;box-shadow:none;border-color:#eef2f7" }, [
       h("div", { class: "panel-title" }, ["Biểu đồ nhiệt độ & độ ẩm ", h("small", null, band ? `ngưỡng cho phép ${band.min}÷${band.max}°C` : "")]),
       h("div", { class: "chart-wrap" }, chartCanvas),
-      h("div", { class: "legend" }, [h("span", { class: "l-temp" }, "Nhiệt độ (°C)"), h("span", { class: "l-hum" }, "Độ ẩm (%)"), h("span", { style: "color:#c53030" }, "● Vi phạm ngưỡng")]),
+      h("div", { class: "legend" }, [h("span", { class: "l-temp" }, "Nhiệt độ (°C)"), h("span", { class: "l-hum" }, "Độ ẩm (%)"), h("span", { style: "color:#c53030" }, "● Vi phạm ngưỡng"), h("span", { style: "color:#c53030" }, "◯ Bị sửa đổi")]),
     ]);
 
     // GPS panel: 2 tab (Sơ đồ offline / Bản đồ OpenStreetMap)
@@ -666,12 +701,13 @@
       h("div", { class: "panel-title" }, ["Bản ghi telemetry ", tableCount]), tableHost,
     ]);
 
+    body.appendChild(warnHost);
     body.appendChild(metricsHost);
     body.appendChild(chartPanel);
     body.appendChild(h("div", { class: "grid-2", style: "margin-top:16px" }, [gpsPanel, alertsPanel]));
     body.appendChild(tablePanel);
 
-    monitorState.refs = { band, metricsHost, chartCanvas, canvasMapEl, leafletEl, dirBtnHost, alertsHost, alertsCount, tableHost, tableCount };
+    monitorState.refs = { band, warnHost, metricsHost, chartCanvas, canvasMapEl, leafletEl, dirBtnHost, alertsHost, alertsCount, tableHost, tableCount };
     if (monitorState.gpsTab === "map") ensureLeafletMap(leafletEl);
   }
 
@@ -696,8 +732,18 @@
       m("Vị trí", latest ? `${num(latest.lat, 4)}, ${num(latest.lng, 4)}` : "—", ""),
     ].forEach((x) => r.metricsHost.appendChild(x));
 
-    // chart
-    const series = asc.map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null }));
+    // banner cảnh báo sửa đổi
+    const tamperedCount = tele.filter((t) => t.tampered).length;
+    clear(r.warnHost);
+    if (tamperedCount > 0) {
+      r.warnHost.appendChild(h("div", { class: "tamper-banner" }, [
+        h("span", null, "⚠"),
+        h("span", null, `Phát hiện ${tamperedCount}/${tele.length} bản ghi telemetry bị sửa đổi — hash/chữ ký tính lại không khớp. Các điểm và dòng tương ứng được tô đỏ.`),
+      ]));
+    }
+
+    // chart (đánh dấu điểm bị sửa đổi)
+    const series = asc.map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
     requestAnimationFrame(() => drawTimeSeries(r.chartCanvas, series, band));
 
     // GPS: canvas + leaflet + nút Google
@@ -726,8 +772,8 @@
     clear(r.tableHost);
     r.tableCount.textContent = tele.length + " bản ghi · hash chain chống sửa đổi";
     if (tele.length) r.tableHost.appendChild(h("div", { style: "overflow-x:auto" }, h("table", null, [
-      h("thead", null, h("tr", null, ["Thời gian", "Device", "Nhiệt độ", "Độ ẩm", "Pin", "RSSI", "GPS", "Record hash"].map((t) => h("th", null, t)))),
-      h("tbody", null, tele.slice(0, 30).map((t) => h("tr", null, [
+      h("thead", null, h("tr", null, ["Thời gian", "Device", "Nhiệt độ", "Độ ẩm", "Pin", "RSSI", "GPS", "Record hash", "Toàn vẹn"].map((t) => h("th", null, t)))),
+      h("tbody", null, tele.slice(0, 30).map((t) => h("tr", { class: t.tampered ? "row-tampered" : "" }, [
         h("td", null, fmtEpoch(t.device_timestamp)),
         h("td", null, h("span", { class: "mono" }, short(t.device_id, 10))),
         h("td", null, num(t.temperature) + "°C"),
@@ -736,6 +782,9 @@
         h("td", null, num(t.rssi, 0)),
         h("td", null, h("span", { class: "mono" }, `${num(t.lat, 4)}, ${num(t.lng, 4)}`)),
         h("td", null, h("span", { class: "mono hash", title: t.record_hash }, short(t.record_hash, 14))),
+        h("td", null, t.tampered
+          ? h("span", { class: "badge badge-tamper", title: tamperTitle(t.integrity_issues) }, "⚠ Đã sửa")
+          : h("span", { class: "badge badge-intact" }, "✔ OK")),
       ]))),
     ])));
     else r.tableHost.appendChild(h("div", { class: "empty" }, "Chưa có telemetry. Thiết bị sẽ gửi dữ liệu sau khi provisioning."));

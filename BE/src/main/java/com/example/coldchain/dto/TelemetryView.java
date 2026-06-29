@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 public record TelemetryView(
@@ -19,6 +20,9 @@ public record TelemetryView(
         @JsonProperty("device_timestamp") Long deviceTimestamp,
         @JsonProperty("payload_hash") String payloadHash,
         @JsonProperty("record_hash") String recordHash,
-        @JsonProperty("created_at") Instant createdAt
+        @JsonProperty("created_at") Instant createdAt,
+        // Kết quả kiểm chứng toàn vẹn (tamper detection) tính lại ở server.
+        boolean tampered,
+        @JsonProperty("integrity_issues") List<String> integrityIssues
 ) {
 }

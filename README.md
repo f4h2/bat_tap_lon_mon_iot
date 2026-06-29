@@ -60,7 +60,9 @@ Mở `http://localhost:8080/` sau khi backend chạy. Các màn hình bám theo 
 | **Chuyến hàng** | Xem & tạo lô hàng kèm ngưỡng nhiệt độ/độ ẩm (Giai đoạn 1) | `GET/POST /api/admin/shipments` |
 | **Mã kích hoạt** | Sinh verify code + **danh sách mã** (tìm kiếm, lọc theo trạng thái) — Giai đoạn 1 | `POST /api/admin/devices/generate-code`, `GET /api/admin/verify-codes` |
 | **Thiết bị** | Danh sách ESP32 đã provisioning (có **ô tìm kiếm**), trạng thái, lần cuối online (Giai đoạn 2) | `GET /api/admin/devices` |
-| **Giám sát** | Telemetry realtime: biểu đồ nhiệt độ/độ ẩm, **lộ trình GPS (2 tab: Sơ đồ offline + Bản đồ)**, pin, RSSI, hash chain & cảnh báo (Giai đoạn 3) | `GET /api/shipments/{code}/telemetry`, `/alerts` |
+| **Giám sát** | Telemetry realtime: biểu đồ nhiệt độ/độ ẩm, **lộ trình GPS (2 tab: Sơ đồ offline + Bản đồ)**, pin, RSSI, hash chain, **phát hiện sửa đổi dữ liệu (tamper)** & cảnh báo (Giai đoạn 3) | `GET /api/shipments/{code}/telemetry`, `/alerts` |
+
+**Phát hiện sửa đổi dữ liệu (tamper detection):** mỗi lần gọi `/telemetry`, backend tính lại và đối chiếu: `payload_hash = SHA256(raw_payload)`, các cột hiển thị có khớp `raw_payload` không, `record_hash`, liên kết hash chain, canonical request, và verify lại **chữ ký ECDSA** bằng public key thiết bị. Bản ghi không khớp được đánh dấu `tampered` kèm `integrity_issues`; dashboard tô đỏ dòng đó trong bảng và khoanh đỏ điểm tương ứng trên biểu đồ. Thử nghiệm: sửa thẳng một giá trị trong bảng `telemetry_records` qua pgAdmin/psql → reload tab Giám sát sẽ thấy dòng đó bị gắn cờ.
 
 Màn Giám sát tự động làm mới mỗi 5 giây. Các bảng danh sách đều có ô tìm kiếm. Lộ trình GPS có 2 tab: **Sơ đồ** (vẽ canvas, chạy offline) và **Bản đồ** (OpenStreetMap tương tác, vẽ trực tiếp lộ trình — cần internet); kèm nút mở lộ trình trên Google Maps.
 

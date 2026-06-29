@@ -137,6 +137,19 @@ tbody tr:hover { background: var(--panel-soft); }
 
 .empty { padding: 28px; text-align: center; color: var(--muted); font-size: 14px; }
 
+/* ---------- Tamper / integrity ---------- */
+.row-tampered { background: #fdecec !important; }
+.row-tampered:hover { background: #fbe0e0 !important; }
+.row-tampered td { color: #8a1c1c; }
+.row-tampered td:first-child { box-shadow: inset 3px 0 0 var(--err); }
+.tamper-banner {
+  display: flex; align-items: center; gap: 10px;
+  background: #fde4e4; border: 1px solid #f3b4b4; color: #9b1c1c;
+  padding: 12px 16px; border-radius: 12px; font-weight: 700; font-size: 13.5px; margin-bottom: 16px;
+}
+.badge-tamper { background: var(--err); color: #fff; cursor: help; }
+.badge-intact { background: #e3f6ec; color: var(--ok); }
+
 /* ---------- Search ---------- */
 .search {
   position: relative; display: inline-flex; align-items: center;
