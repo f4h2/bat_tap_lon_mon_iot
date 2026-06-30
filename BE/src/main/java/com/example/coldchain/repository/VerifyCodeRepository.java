@@ -10,6 +10,9 @@ import org.springframework.data.repository.query.Param;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 public interface VerifyCodeRepository extends JpaRepository<VerifyCode, String> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select v from VerifyCode v where v.verifyCode = :verifyCode")
@@ -17,5 +20,5 @@ public interface VerifyCodeRepository extends JpaRepository<VerifyCode, String> 
 
     long countByStatus(com.example.coldchain.entity.enums.VerifyCodeStatus status);
 
-    List<VerifyCode> findAllByOrderByCreatedAtDesc();
+    Page<VerifyCode> findAllByOrderByCreatedAtDesc(Pageable pageable);
 }

@@ -12,6 +12,8 @@ import com.example.coldchain.repository.TelemetryRecordRepository;
 import com.example.coldchain.util.HashUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -49,24 +51,18 @@ public class ShipmentQueryService {
     }
 
     @Transactional(readOnly = true)
-    public List<TelemetryView> telemetry(String shipmentCode) {
+    public Page<TelemetryView> telemetry(String shipmentCode, Pageable pageable) {
         ensureShipmentExists(shipmentCode);
-        List<TelemetryRecord> records = telemetryRepository.findByShipmentCodeOrderByCreatedAtDesc(shipmentCode);
-
-        Map<UUID, Boolean> chainOkById = computeChainLinkage(records);
-        Map<String, Device> deviceCache = new HashMap<>();
-
-        List<TelemetryView> views = new ArrayList<>(records.size());
-        for (TelemetryRecord t : records) {
-            List<String> issues = verifyIntegrity(t, chainOkById.getOrDefault(t.getId(), Boolean.TRUE), deviceCache);
-            views.add(new TelemetryView(
-                    t.getId(), t.getDeviceId(), t.getShipmentCode(),
-                    t.getTemperature(), t.getHumidity(), t.getRssi(), t.getLat(), t.getLng(), t.getBattery(),
-                    t.getDeviceTimestamp(), t.getPayloadHash(), t.getRecordHash(), t.getCreatedAt(),
-                    !issues.isEmpty(), issues
-            ));
-        }
-        return views;
+        return telemetryRepository.findByShipmentCodeOrderByCreatedAtDesc(shipmentCode, pageable)
+                .map(t -> {
+                    List<String> issues = verifyIntegrity(t, true, new HashMap<>());
+                    return new TelemetryView(
+                            t.getId(), t.getDeviceId(), t.getShipmentCode(),
+                            t.getTemperature(), t.getHumidity(), t.getRssi(), t.getLat(), t.getLng(), t.getBattery(),
+                            t.getDeviceTimestamp(), t.getPayloadHash(), t.getRecordHash(), t.getCreatedAt(),
+                            !issues.isEmpty(), issues
+                    );
+                });
     }
 
     /**
@@ -157,9 +153,9 @@ public class ShipmentQueryService {
     }
 
     @Transactional(readOnly = true)
-    public List<AlertView> alerts(String shipmentCode) {
+    public Page<AlertView> alerts(String shipmentCode, Pageable pageable) {
         ensureShipmentExists(shipmentCode);
-        return alertRepository.findByShipmentCodeOrderByCreatedAtDesc(shipmentCode).stream()
+        return alertRepository.findByShipmentCodeOrderByCreatedAtDesc(shipmentCode, pageable)
                 .map(a -> new AlertView(
                         a.getId(),
                         a.getShipmentCode(),
@@ -168,8 +164,7 @@ public class ShipmentQueryService {
                         a.getLevel().name(),
                         a.getMessage(),
                         a.getCreatedAt()
-                ))
-                .toList();
+                ));
     }
 
     private void ensureShipmentExists(String shipmentCode) {

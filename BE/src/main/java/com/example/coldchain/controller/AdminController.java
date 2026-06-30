@@ -4,10 +4,13 @@ import com.example.coldchain.dto.admin.CreateShipmentRequest;
 import com.example.coldchain.dto.admin.DashboardStatsResponse;
 import com.example.coldchain.dto.admin.DeviceAdminResponse;
 import com.example.coldchain.dto.admin.GenerateVerifyCodeRequest;
+import com.example.coldchain.dto.admin.UpdateShipmentStatusRequest;
 import com.example.coldchain.entity.Shipment;
 import com.example.coldchain.entity.VerifyCode;
 import com.example.coldchain.service.AdminService;
 import jakarta.validation.Valid;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -24,13 +27,15 @@ public class AdminController {
     }
 
     @GetMapping("/devices")
-    public ResponseEntity<List<DeviceAdminResponse>> getDevices() {
-        return ResponseEntity.ok(adminService.getDevices());
+    public ResponseEntity<Page<DeviceAdminResponse>> getDevices(@RequestParam(defaultValue = "0") int page,
+                                                                @RequestParam(defaultValue = "100") int size) {
+        return ResponseEntity.ok(adminService.getDevices(PageRequest.of(page, size)));
     }
 
     @GetMapping("/shipments")
-    public ResponseEntity<List<Shipment>> getShipments() {
-        return ResponseEntity.ok(adminService.getShipments());
+    public ResponseEntity<Page<Shipment>> getShipments(@RequestParam(defaultValue = "0") int page,
+                                                       @RequestParam(defaultValue = "100") int size) {
+        return ResponseEntity.ok(adminService.getShipments(PageRequest.of(page, size)));
     }
 
     @PostMapping("/shipments")
@@ -38,9 +43,15 @@ public class AdminController {
         return ResponseEntity.ok(adminService.createShipment(request));
     }
 
+    @PutMapping("/shipments/{code}/status")
+    public ResponseEntity<Shipment> updateShipmentStatus(@PathVariable String code, @Valid @RequestBody UpdateShipmentStatusRequest request) {
+        return ResponseEntity.ok(adminService.updateShipmentStatus(code, request));
+    }
+
     @GetMapping("/verify-codes")
-    public ResponseEntity<List<VerifyCode>> getVerifyCodes() {
-        return ResponseEntity.ok(adminService.getVerifyCodes());
+    public ResponseEntity<Page<VerifyCode>> getVerifyCodes(@RequestParam(defaultValue = "0") int page,
+                                                           @RequestParam(defaultValue = "100") int size) {
+        return ResponseEntity.ok(adminService.getVerifyCodes(PageRequest.of(page, size)));
     }
 
     @PostMapping("/devices/generate-code")

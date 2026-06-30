@@ -7,7 +7,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 public interface TelemetryRecordRepository extends JpaRepository<TelemetryRecord, UUID> {
     Optional<TelemetryRecord> findTopByDeviceIdOrderByCreatedAtDesc(String deviceId);
-    List<TelemetryRecord> findByShipmentCodeOrderByCreatedAtDesc(String shipmentCode);
+    Page<TelemetryRecord> findByShipmentCodeOrderByCreatedAtDesc(String shipmentCode, Pageable pageable);
 }

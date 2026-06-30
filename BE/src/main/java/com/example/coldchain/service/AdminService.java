@@ -21,7 +21,11 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
+import java.util.UUID;
 import java.util.stream.Collectors;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Service
 public class AdminService {
@@ -40,8 +44,8 @@ public class AdminService {
         this.alertRepository = alertRepository;
     }
 
-    public List<DeviceAdminResponse> getDevices() {
-        return deviceRepository.findAll().stream()
+    public Page<DeviceAdminResponse> getDevices(Pageable pageable) {
+        return deviceRepository.findAll(pageable)
                 .map(d -> new DeviceAdminResponse(
                         d.getDeviceId(),
                         d.getShipmentCode(),
@@ -50,16 +54,15 @@ public class AdminService {
                         d.getCreatedAt(),
                         d.getActivatedAt(),
                         d.getLastSeenAt()
-                ))
-                .collect(Collectors.toList());
+                ));
     }
 
-    public List<Shipment> getShipments() {
-        return shipmentRepository.findAll();
+    public Page<Shipment> getShipments(Pageable pageable) {
+        return shipmentRepository.findAll(pageable);
     }
 
-    public List<VerifyCode> getVerifyCodes() {
-        return verifyCodeRepository.findAllByOrderByCreatedAtDesc();
+    public Page<VerifyCode> getVerifyCodes(Pageable pageable) {
+        return verifyCodeRepository.findAllByOrderByCreatedAtDesc(pageable);
     }
 
     @Transactional
@@ -75,6 +78,14 @@ public class AdminService {
         shipment.setMinHumidity(request.minHumidity());
         shipment.setMaxHumidity(request.maxHumidity());
         shipment.setStatus(ShipmentStatus.ACTIVE);
+        return shipmentRepository.save(shipment);
+    }
+
+    @Transactional
+    public Shipment updateShipmentStatus(String shipmentCode, com.example.coldchain.dto.admin.UpdateShipmentStatusRequest request) {
+        Shipment shipment = shipmentRepository.findById(shipmentCode)
+                .orElseThrow(() -> ApiException.badRequest("SHIPMENT_NOT_FOUND", "Shipment not found"));
+        shipment.setStatus(request.status());
         return shipmentRepository.save(shipment);
     }
 

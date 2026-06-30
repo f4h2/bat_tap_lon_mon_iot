@@ -21,6 +21,10 @@
       try { data = JSON.parse(text); } catch (_) { data = text; }
     }
 
+    if (data && Array.isArray(data.content) && typeof data.totalPages === 'number') {
+      data = data.content;
+    }
+
     if (!res.ok) {
       const code = (data && data.code) || "HTTP_" + res.status;
       const msg = (data && data.message) || ("Lỗi HTTP " + res.status);
@@ -43,16 +47,17 @@
     // Dashboard
     stats: () => request("GET", "/api/admin/dashboard/stats"),
     // Shipments
-    listShipments: () => request("GET", "/api/admin/shipments"),
+    listShipments: () => request("GET", "/api/admin/shipments?size=100"),
     createShipment: (payload) => request("POST", "/api/admin/shipments", payload),
+    updateShipmentStatus: (code, status) => request("PUT", "/api/admin/shipments/" + encodeURIComponent(code) + "/status", { status }),
     // Devices
-    listDevices: () => request("GET", "/api/admin/devices"),
+    listDevices: () => request("GET", "/api/admin/devices?size=100"),
     // Verify codes
-    listVerifyCodes: () => request("GET", "/api/admin/verify-codes"),
+    listVerifyCodes: () => request("GET", "/api/admin/verify-codes?size=100"),
     generateCode: (payload) => request("POST", "/api/admin/devices/generate-code", payload),
     // Per-shipment monitoring
-    telemetry: (code) => request("GET", "/api/shipments/" + encodeURIComponent(code) + "/telemetry"),
-    alerts: (code) => request("GET", "/api/shipments/" + encodeURIComponent(code) + "/alerts"),
+    telemetry: (code) => request("GET", "/api/shipments/" + encodeURIComponent(code) + "/telemetry?size=500"),
+    alerts: (code) => request("GET", "/api/shipments/" + encodeURIComponent(code) + "/alerts?size=100"),
   };
 
   global.Api = Api;

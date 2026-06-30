@@ -5,6 +5,7 @@ import com.example.coldchain.dto.TelemetryRequest;
 import com.example.coldchain.dto.TelemetryResponse;
 import com.example.coldchain.entity.*;
 import com.example.coldchain.entity.enums.DeviceStatus;
+import com.example.coldchain.entity.enums.ShipmentStatus;
 import com.example.coldchain.exception.ApiException;
 import com.example.coldchain.repository.*;
 import com.example.coldchain.util.ApiKeyUtil;
@@ -85,6 +86,11 @@ public class TelemetryIngestionService {
 
         Shipment shipment = shipmentRepository.findById(payload.shipmentCode())
                 .orElseThrow(() -> ApiException.badRequest("SHIPMENT_NOT_FOUND", "Shipment does not exist"));
+
+        if (shipment.getStatus() != ShipmentStatus.ACTIVE) {
+            auditService.fail("DEVICE", deviceId, "TELEMETRY", "Shipment is not active");
+            throw ApiException.forbidden("SHIPMENT_NOT_ACTIVE", "Shipment is " + shipment.getStatus());
+        }
 
         String payloadHash = HashUtil.sha256Hex(rawPayload);
         String canonicalRequest = canonicalRequest(deviceId, timestamp, cleanNonce, payloadHash);

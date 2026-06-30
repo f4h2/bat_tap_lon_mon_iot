@@ -142,7 +142,7 @@
   }
 
   /* ---------------- Canvas: line chart nhiệt độ / độ ẩm ---------------- */
-  function drawTimeSeries(canvas, points, band) {
+  function drawTimeSeries(canvas, points, band, hoveredIdx) {
     const ctx = canvas.getContext("2d");
     const dpr = window.devicePixelRatio || 1;
     const W = canvas.clientWidth, H = canvas.clientHeight;
@@ -226,7 +226,96 @@
       if (p.t != null) { ctx.beginPath(); ctx.arc(x(i), yT(p.t), 6, 0, Math.PI * 2); ctx.stroke(); }
       if (p.h != null) { ctx.beginPath(); ctx.arc(x(i), yH(p.h), 6, 0, Math.PI * 2); ctx.stroke(); }
     });
+
+    // vẽ đường gióng đứng khi hover
+    if (hoveredIdx != null && hoveredIdx >= 0 && hoveredIdx < points.length) {
+      const hx = x(hoveredIdx);
+      ctx.strokeStyle = "rgba(53, 90, 121, 0.4)";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(hx, padT);
+      ctx.lineTo(hx, padT + plotH);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const p = points[hoveredIdx];
+      if (p.t != null) {
+        ctx.fillStyle = "#e65f2b";
+        ctx.beginPath(); ctx.arc(hx, yT(p.t), 5, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke();
+      }
+      if (p.h != null) {
+        ctx.fillStyle = "#1f6feb";
+        ctx.beginPath(); ctx.arc(hx, yH(p.h), 5, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke();
+      }
+    }
   }
+  function showTooltip(e, item, canvasRect) {
+    let tooltipEl = document.getElementById("chartTooltip");
+    if (!tooltipEl) {
+      tooltipEl = h("div", { id: "chartTooltip", class: "chart-tooltip" });
+      document.body.appendChild(tooltipEl);
+    }
+    clear(tooltipEl);
+    const timeStr = fmtEpoch(item.device_timestamp);
+    const tempVal = num(item.temperature) + "°C";
+    const humVal = num(item.humidity) + "%";
+    const batVal = num(item.battery, 0) + "%";
+    const rssiVal = num(item.rssi, 0) + " dBm";
+    const statusText = item.tampered ? "Bị sửa đổi ⚠" : "Toàn vẹn ✔";
+    const statusClass = item.tampered ? "t-err" : "t-ok";
+    
+    tooltipEl.appendChild(h("div", { class: "tooltip-time" }, timeStr));
+    tooltipEl.appendChild(h("div", { class: "tooltip-row" }, [
+      h("span", null, "Nhiệt độ:"), h("span", { class: "tooltip-val temp-val" }, tempVal)
+    ]));
+    tooltipEl.appendChild(h("div", { class: "tooltip-row" }, [
+      h("span", null, "Độ ẩm:"), h("span", { class: "tooltip-val hum-val" }, humVal)
+    ]));
+    tooltipEl.appendChild(h("div", { class: "tooltip-row" }, [
+      h("span", null, "Pin:"), h("span", { class: "tooltip-val" }, batVal)
+    ]));
+    tooltipEl.appendChild(h("div", { class: "tooltip-row" }, [
+      h("span", null, "Tín hiệu:"), h("span", { class: "tooltip-val" }, rssiVal)
+    ]));
+    tooltipEl.appendChild(h("div", { class: "tooltip-row" }, [
+      h("span", null, "Trạng thái:"), h("span", { class: "tooltip-val " + statusClass }, statusText)
+    ]));
+
+    if (item.tampered && item.integrity_issues && item.integrity_issues.length) {
+      const issueList = item.integrity_issues.map(tamperLabel).join(", ");
+      tooltipEl.appendChild(h("div", { class: "tooltip-issues" }, "Lỗi: " + issueList));
+    }
+
+    tooltipEl.style.display = "block";
+    const tooltipW = tooltipEl.offsetWidth;
+    const tooltipH = tooltipEl.offsetHeight;
+    
+    let left = window.scrollX + e.clientX + 15;
+    let top = window.scrollY + e.clientY - tooltipH / 2;
+    
+    if (left + tooltipW > window.innerWidth + window.scrollX) {
+      left = window.scrollX + e.clientX - tooltipW - 15;
+    }
+    if (top < window.scrollY) {
+      top = window.scrollY + 10;
+    } else if (top + tooltipH > window.scrollY + window.innerHeight) {
+      top = window.scrollY + window.innerHeight - tooltipH - 10;
+    }
+    
+    tooltipEl.style.left = left + "px";
+    tooltipEl.style.top = top + "px";
+  }
+
+  function hideTooltip() {
+    const tooltipEl = document.getElementById("chartTooltip");
+    if (tooltipEl) {
+      tooltipEl.style.display = "none";
+    }
+  }
+
   function drawLine(ctx, points, x, y, pick, color) {
     ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.lineJoin = "round";
     ctx.beginPath();
@@ -288,6 +377,79 @@
     ctx.fillStyle = "#e65f2b";
     ctx.beginPath(); ctx.arc(X(last.lng), Y(last.lat), 6.5, 0, Math.PI * 2); ctx.fill();
     ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+  }
+
+  /* ---------------- Canvas: biểu đồ phân tích nguy cơ (Doughnut Chart) ---------------- */
+  function drawDoughnutChart(canvas, data) {
+    const ctx = canvas.getContext("2d");
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.clientWidth, H = canvas.clientHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, W, H);
+
+    const centerX = W / 2;
+    const centerY = H / 2;
+    const radius = Math.min(W, H) / 2 - 12;
+    const innerRadius = radius * 0.65;
+
+    const total = data.reduce((acc, d) => acc + d.value, 0);
+    if (total === 0) {
+      // Draw empty state circle (safe)
+      ctx.strokeStyle = "#e3f6ec";
+      ctx.lineWidth = radius - innerRadius;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, (radius + innerRadius) / 2, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.fillStyle = "#1f9d55";
+      ctx.font = "bold 13px Segoe UI";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("AN TOÀN", centerX, centerY - 6);
+      ctx.fillStyle = "#6b829c";
+      ctx.font = "10px Segoe UI";
+      ctx.fillText("0 nguy cơ", centerX, centerY + 8);
+      return;
+    }
+
+    let startAngle = -Math.PI / 2;
+    data.forEach((d) => {
+      if (d.value === 0) return;
+      const sliceAngle = (d.value / total) * Math.PI * 2;
+      
+      ctx.strokeStyle = d.color;
+      ctx.lineWidth = radius - innerRadius;
+      ctx.beginPath();
+      ctx.arc(centerX, centerY, (radius + innerRadius) / 2, startAngle, startAngle + sliceAngle);
+      ctx.stroke();
+
+      startAngle += sliceAngle;
+    });
+
+    // Draw center text
+    const highVal = (data.find(d => d.name === "Nguy cơ cao") || { value: 0 }).value;
+    const warnVal = (data.find(d => d.name === "Cảnh báo") || { value: 0 }).value;
+    
+    let label = "AN TOÀN";
+    let color = "#1f9d55";
+    if (highVal > 0) {
+      label = "NGUY HIỂM";
+      color = "#c53030";
+    } else if (warnVal > 0) {
+      label = "CẢNH BÁO";
+      color = "#d97706";
+    }
+    
+    ctx.fillStyle = color;
+    ctx.font = "bold 13px Segoe UI";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, centerX, centerY - 7);
+    
+    ctx.fillStyle = "#6b829c";
+    ctx.font = "10px Segoe UI";
+    ctx.fillText(`${total} sự cố`, centerX, centerY + 8);
   }
 
   /* ============================================================
@@ -366,7 +528,7 @@
   function shipmentsTable(list) {
     if (!list.length) return h("div", { class: "empty" }, "Chưa có chuyến hàng nào.");
     return h("div", { style: "overflow-x:auto" }, h("table", null, [
-      h("thead", null, h("tr", null, ["Mã", "Loại hàng", "Nhiệt độ (°C)", "Độ ẩm (%)", "Trạng thái", "Tạo lúc"].map((t) => h("th", null, t)))),
+      h("thead", null, h("tr", null, ["Mã", "Loại hàng", "Nhiệt độ (°C)", "Độ ẩm (%)", "Trạng thái", "Tạo lúc", "Hành động"].map((t) => h("th", null, t)))),
       h("tbody", null, list.map((s) => h("tr", null, [
         h("td", null, h("span", { class: "mono" }, s.shipmentCode)),
         h("td", null, s.itemType),
@@ -374,6 +536,21 @@
         h("td", null, `${num(s.minHumidity)} ÷ ${num(s.maxHumidity)}`),
         h("td", null, statusBadge(s.status)),
         h("td", null, fmtDateTime(s.createdAt)),
+        h("td", null, s.status === 'ACTIVE' ? h("button", {
+            class: "btn btn-ghost",
+            style: "font-size: 11px; padding: 2px 6px;",
+            onclick: async () => {
+                if (confirm("Chắc chắn kết thúc chuyến hàng " + s.shipmentCode + "? Thiết bị sẽ không thể gửi thêm dữ liệu.")) {
+                    try {
+                        await Api.updateShipmentStatus(s.shipmentCode, "COMPLETED");
+                        toast("Đã kết thúc chuyến hàng", "ok");
+                        viewShipments();
+                    } catch (err) {
+                        toast("Lỗi: " + (err.message || err), "err");
+                    }
+                }
+            }
+        }, "Kết thúc") : "")
       ]))),
     ]));
   }
@@ -650,9 +827,15 @@
     if (monitorState.gpsMap) { try { monitorState.gpsMap.remove(); } catch (_) {} }
     monitorState.gpsMap = null; monitorState.gpsRouteLayer = null; monitorState.gpsFitted = false;
     monitorState.roadRoute = null; monitorState.roadRouteKey = null; monitorState.roadRouteFetching = null;
+    monitorState.hoveredIndex = null;
 
     const band = (ship.minTemperature != null && ship.maxTemperature != null)
-      ? { min: Number(ship.minTemperature), max: Number(ship.maxTemperature) } : null;
+      ? {
+          min: Number(ship.minTemperature),
+          max: Number(ship.maxTemperature),
+          minHum: ship.minHumidity != null ? Number(ship.minHumidity) : null,
+          maxHum: ship.maxHumidity != null ? Number(ship.maxHumidity) : null
+        } : null;
 
     const warnHost = h("div");
     const metricsHost = h("div", { class: "metric-row" });
@@ -689,9 +872,21 @@
       canvasPane, mapPane, dirBtnHost,
     ]);
 
+    // Risk Panel
+    const riskCanvas = h("canvas");
+    const riskPanel = h("div", { class: "panel", style: "box-shadow:none;border-color:#eef2f7;margin-top:0;" }, [
+      h("div", { class: "panel-title" }, "Phân tích nguy cơ"),
+      h("div", { class: "chart-wrap", style: "height:140px; margin-top:8px;" }, riskCanvas),
+      h("div", { class: "legend", style: "justify-content:center; margin-top:8px;" }, [
+        h("span", { class: "l-high-risk" }, "Nguy cơ cao"),
+        h("span", { class: "l-warn-risk" }, "Cảnh báo"),
+        h("span", { class: "l-ok-risk" }, "An toàn"),
+      ])
+    ]);
+
     const alertsCount = h("small", null, "0 mục");
     const alertsHost = h("div");
-    const alertsPanel = h("div", { class: "panel", style: "box-shadow:none;border-color:#eef2f7" }, [
+    const alertsPanel = h("div", { class: "panel", style: "box-shadow:none;border-color:#eef2f7;margin-top:0;" }, [
       h("div", { class: "panel-title" }, ["Cảnh báo ", alertsCount]), alertsHost,
     ]);
 
@@ -701,21 +896,81 @@
       h("div", { class: "panel-title" }, ["Bản ghi telemetry ", tableCount]), tableHost,
     ]);
 
+    // Thêm mousemove listener cho chart
+    chartCanvas.addEventListener("mousemove", (e) => {
+      const rect = chartCanvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const W = chartCanvas.clientWidth;
+      const padL = 42, padR = 42;
+      const plotW = W - padL - padR;
+      const curTele = monitorState.lastTele || [];
+      if (!curTele.length) return;
+      const points = curTele.slice().reverse(); // ASC order
+      if (mouseX >= padL && mouseX <= W - padR) {
+        const hoveredIdx = Math.round(((mouseX - padL) * (points.length - 1)) / plotW);
+        if (hoveredIdx >= 0 && hoveredIdx < points.length) {
+          monitorState.hoveredIndex = hoveredIdx;
+          const series = points.map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
+          drawTimeSeries(chartCanvas, series, band, hoveredIdx);
+          showTooltip(e, points[hoveredIdx], rect);
+          return;
+        }
+      }
+      hideTooltip();
+      const series = points.map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
+      drawTimeSeries(chartCanvas, series, band, null);
+    });
+
+    chartCanvas.addEventListener("mouseleave", () => {
+      monitorState.hoveredIndex = null;
+      hideTooltip();
+      const curTele = monitorState.lastTele || [];
+      if (curTele.length) {
+        const points = curTele.slice().reverse();
+        const series = points.map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
+        drawTimeSeries(chartCanvas, series, band, null);
+      }
+    });
+
     body.appendChild(warnHost);
     body.appendChild(metricsHost);
     body.appendChild(chartPanel);
-    body.appendChild(h("div", { class: "grid-2", style: "margin-top:16px" }, [gpsPanel, alertsPanel]));
+
+    const rightCol = h("div", { style: "display:flex; flex-direction:column; gap:16px;" }, [riskPanel, alertsPanel]);
+    body.appendChild(h("div", { class: "grid-2", style: "margin-top:16px" }, [gpsPanel, rightCol]));
     body.appendChild(tablePanel);
 
-    monitorState.refs = { band, warnHost, metricsHost, chartCanvas, canvasMapEl, leafletEl, dirBtnHost, alertsHost, alertsCount, tableHost, tableCount };
+    monitorState.refs = { band, warnHost, metricsHost, chartCanvas, canvasMapEl, leafletEl, dirBtnHost, alertsHost, alertsCount, tableHost, tableCount, riskCanvas };
     if (monitorState.gpsTab === "map") ensureLeafletMap(leafletEl);
   }
 
   function updateMonitorData(ship, tele, alerts) {
     const r = monitorState.refs; if (!r) return;
+    monitorState.lastTele = tele;
     const asc = tele.slice().reverse(); // DESC -> ASC theo thời gian
     const latest = tele[0];
     const band = r.band;
+
+    // Phân tích nguy cơ
+    const totalRecords = tele.length;
+    const highRisk = tele.filter(t => t.tampered || (band && (t.temperature < band.min || t.temperature > band.max))).length;
+    const warnRisk = tele.filter(t => {
+      if (t.tampered || (band && (t.temperature < band.min || t.temperature > band.max))) return false;
+      return (band && (band.minHum != null && band.maxHum != null && (t.humidity < band.minHum || t.humidity > band.maxHum))) ||
+             (t.battery != null && t.battery < 20) ||
+             (t.rssi != null && t.rssi < -85);
+    }).length;
+    const safeRecords = Math.max(0, totalRecords - highRisk - warnRisk);
+
+    const riskData = [
+      { name: "Nguy cơ cao", value: highRisk, color: "#c53030" },
+      { name: "Cảnh báo", value: warnRisk, color: "#d97706" },
+      { name: "An toàn", value: safeRecords, color: "#1f9d55" }
+    ];
+
+    if (r.riskCanvas) {
+      requestAnimationFrame(() => drawDoughnutChart(r.riskCanvas, riskData));
+    }
 
     // metrics
     clear(r.metricsHost);
@@ -744,7 +999,7 @@
 
     // chart (đánh dấu điểm bị sửa đổi)
     const series = asc.map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
-    requestAnimationFrame(() => drawTimeSeries(r.chartCanvas, series, band));
+    requestAnimationFrame(() => drawTimeSeries(r.chartCanvas, series, band, monitorState.hoveredIndex));
 
     // GPS: canvas + leaflet + nút Google
     const coords = asc.map((t) => ({ lat: t.lat != null ? Number(t.lat) : null, lng: t.lng != null ? Number(t.lng) : null }));
