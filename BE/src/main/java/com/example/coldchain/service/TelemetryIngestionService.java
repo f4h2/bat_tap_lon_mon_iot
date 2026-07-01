@@ -33,6 +33,7 @@ public class TelemetryIngestionService {
     private final AlertService alertService;
     private final AuditService auditService;
     private final SecurityProperties securityProperties;
+    private final RecordHashService recordHashService;
     private final ObjectMapper objectMapper;
     private final Validator validator;
 
@@ -44,6 +45,7 @@ public class TelemetryIngestionService {
                                      AlertService alertService,
                                      AuditService auditService,
                                      SecurityProperties securityProperties,
+                                     RecordHashService recordHashService,
                                      ObjectMapper objectMapper,
                                      Validator validator) {
         this.deviceRepository = deviceRepository;
@@ -54,6 +56,7 @@ public class TelemetryIngestionService {
         this.alertService = alertService;
         this.auditService = auditService;
         this.securityProperties = securityProperties;
+        this.recordHashService = recordHashService;
         this.objectMapper = objectMapper;
         this.validator = validator;
     }
@@ -104,7 +107,7 @@ public class TelemetryIngestionService {
         String previousHash = telemetryRepository.findTopByDeviceIdOrderByCreatedAtDesc(deviceId)
                 .map(TelemetryRecord::getRecordHash)
                 .orElse("GENESIS");
-        String recordHash = HashUtil.sha256Hex(deviceId + "|" + timestamp + "|" + payloadHash + "|" + cleanSignature + "|" + previousHash);
+        String recordHash = recordHashService.recordHash(deviceId, timestamp, payloadHash, cleanSignature, previousHash);
 
         TelemetryRecord telemetry = new TelemetryRecord();
         telemetry.setDeviceId(deviceId);

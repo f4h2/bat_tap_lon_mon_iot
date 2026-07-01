@@ -87,6 +87,19 @@
     return "Phát hiện sửa đổi:\n• " + (issues || []).map(tamperLabel).join("\n• ");
   }
 
+  function btn(label, cls, onClick) {
+    const b = h("button", { class: "btn " + cls }, label);
+    b.addEventListener("click", () => onClick(b));
+    return b;
+  }
+  function kpiCard(label, value, foot, danger) {
+    return h("div", { class: "kpi" }, [
+      h("div", { class: "kpi-label" }, label),
+      h("div", { class: "kpi-value", style: danger ? "color:#c53030" : "" }, String(value != null ? value : "—")),
+      h("div", { class: "kpi-foot" }, foot),
+    ]);
+  }
+
   /* Các điểm chủ quyền Việt Nam ghi đè lên bản đồ (OSM thiếu nhãn 2 quần đảo này). */
   const VN_ISLANDS = [
     { name: "Quần đảo Hoàng Sa (Việt Nam)", lat: 16.5, lng: 112.0 },
@@ -1134,6 +1147,65 @@
     return "https://www.google.com/maps/dir/" + pts.map((c) => `${c.lat},${c.lng}`).join("/");
   }
 
+  /* ---- Toàn vẹn dữ liệu (integrity / notary) ---- */
+  async function viewIntegrity() {
+    setHeader("Toàn vẹn dữ liệu", "Kiểm chứng hash chain (HMAC khóa server) và đối chiếu các điểm đối soát đã công bố.");
+    setLoading();
+    try {
+      const report = await Api.integrityStatus();
+      renderIntegrity(report);
+    } catch (err) { showError(err); }
+  }
+
+  function renderIntegrity(report) {
+    clear(view);
+
+    view.appendChild(h("div", { class: "toolbar", style: "margin-bottom:16px" }, [
+      btn("⛨ Tạo điểm đối soát", "btn-primary", async (b) => {
+        b.disabled = true;
+        try { const a = await Api.createAnchor(); toast("Đã tạo & công bố điểm đối soát (" + a.recordCount + " bản ghi)", "ok"); viewIntegrity(); }
+        catch (e) { toast(e instanceof Api.ApiError ? e.message : "Lỗi tạo điểm đối soát", "err"); b.disabled = false; }
+      }),
+      btn("⟳ Kiểm tra lại", "btn-ghost", () => viewIntegrity()),
+    ]));
+
+    view.appendChild(h("div", { class: report.ok ? "ok-banner" : "tamper-banner" }, [
+      h("span", null, report.ok ? "✔" : "⚠"),
+      h("span", null, report.message),
+    ]));
+
+    view.appendChild(h("div", { class: "kpi-grid" }, [
+      kpiCard("Bản ghi", report.totalRecords, "Tổng telemetry"),
+      kpiCard("Bản ghi bị sửa", report.tamperedRecords, "record_hash / chuỗi không khớp", report.tamperedRecords > 0),
+      kpiCard("Điểm đối soát", report.totalAnchors, "Đã tạo & công bố"),
+      kpiCard("Đối soát sai / mất", report.invalidAnchors + report.missingFromDbAnchors, "Bị giả mạo hoặc xoá", (report.invalidAnchors + report.missingFromDbAnchors) > 0),
+    ]));
+
+    view.appendChild(h("div", { class: "panel" }, [
+      h("div", { class: "panel-title" }, ["Sổ đối soát (append-only) ", h("small", null, report.anchors.length + " điểm")]),
+      report.anchors.length ? h("div", { style: "overflow-x:auto" }, h("table", null, [
+        h("thead", null, h("tr", null, ["Thời điểm", "Số bản ghi", "Head hash", "Trạng thái"].map((t) => h("th", null, t)))),
+        h("tbody", null, report.anchors.slice().reverse().map((a) => h("tr", { class: a.valid ? "" : "row-tampered" }, [
+          h("td", null, fmtDateTime(a.createdAt)),
+          h("td", null, String(a.recordCount)),
+          h("td", null, h("span", { class: "mono hash", title: a.headHash }, short(a.headHash, 16))),
+          h("td", null, a.valid
+            ? h("span", { class: "badge badge-intact" }, "✔ Hợp lệ")
+            : h("span", { class: "badge badge-tamper", title: a.note }, "⚠ " + a.note)),
+        ]))),
+      ])) : h("div", { class: "empty" }, "Chưa có điểm đối soát. Bấm \"Tạo điểm đối soát\" để công bố trạng thái hiện tại rồi thử sửa DB và kiểm tra lại."),
+    ]));
+
+    view.appendChild(h("div", { class: "panel" }, [
+      h("div", { class: "panel-title" }, "Cơ chế chống sửa đổi"),
+      h("ul", { style: "margin:8px 0 0;padding-left:18px;color:#355a79;font-size:13px;line-height:1.9" }, [
+        h("li", null, "record_hash = HMAC-SHA256(khóa server, …). Khóa đặt ngoài DB → người chỉ có quyền DB không tính lại được hash hợp lệ."),
+        h("li", null, "Mỗi \"điểm đối soát\" công bố head của hash chain ra sổ append-only + file ngoài DB; các điểm tự liên kết và được HMAC."),
+        h("li", null, "Khi kiểm tra: tính lại toàn chuỗi và đối chiếu các điểm đối soát đã công bố → mọi sửa/xoá lịch sử đều làm lệch điểm đối soát."),
+      ]),
+    ]));
+  }
+
   /* ============================================================
    *  Router
    * ============================================================ */
@@ -1143,6 +1215,7 @@
     codes: viewCodes,
     devices: viewDevices,
     monitor: viewMonitor,
+    integrity: viewIntegrity,
   };
 
   function setHeader(title, sub) { pageTitle.textContent = title; pageSub.textContent = sub; }

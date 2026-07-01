@@ -58,6 +58,9 @@
     // Per-shipment monitoring
     telemetry: (code) => request("GET", "/api/shipments/" + encodeURIComponent(code) + "/telemetry?size=500"),
     alerts: (code) => request("GET", "/api/shipments/" + encodeURIComponent(code) + "/alerts?size=100"),
+    // Integrity / notary
+    integrityStatus: () => request("GET", "/api/admin/integrity/status"),
+    createAnchor: () => request("POST", "/api/admin/integrity/anchor"),
   };
 
   global.Api = Api;

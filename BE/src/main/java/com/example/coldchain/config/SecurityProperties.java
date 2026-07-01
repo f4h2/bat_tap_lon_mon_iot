@@ -6,6 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record SecurityProperties(
         String apiKeyPepper,
         long timestampSkewSeconds,
-        String defaultSignatureAlgorithm
+        String defaultSignatureAlgorithm,
+        // Khóa bí mật để HMAC record_hash & anchor — PHẢI đặt ngoài DB (env/KMS).
+        String integritySecret
 ) {
 }

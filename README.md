@@ -18,7 +18,7 @@ Toàn bộ luồng dữ liệu được mô tả trong [docs/sequence_diagram.md
 
 | Cho phần | Cần cài |
 |---|---|
-| Backend | Docker Desktop, **JDK 21**, **Maven** (repo không kèm `mvnw` wrapper) |
+| Backend | **Chỉ cần Docker Desktop** (backend build & chạy trong Docker — không cần cài JDK/Maven) |
 | ESP32 thật | Arduino IDE + ESP32 core + thư viện: DHT, TinyGPSPlus, ArduinoJson |
 | Giả lập ESP32 (không cần mạch) | Git Bash + `openssl` + `python3` + `curl` |
 
@@ -31,11 +31,11 @@ Trung tâm của cả Giai đoạn 1 (admin sinh code) và Giai đoạn 3 (nhậ
 ```bash
 cd BE
 
-# 1. Bật PostgreSQL + pgAdmin
-docker compose up -d
+# Build + chạy backend + PostgreSQL trong Docker (lần đầu hơi lâu vì build Maven)
+docker compose up -d --build
 
-# 2. Chạy backend (Flyway tự tạo bảng + seed data mẫu)
-mvn spring-boot:run
+# pgAdmin (tuỳ chọn):
+docker compose --profile tools up -d
 ```
 
 Kiểm tra:
@@ -46,7 +46,15 @@ Kiểm tra:
 
 Data seed sẵn để demo: `shipment_code = SHIP-123`; `verify_code = SHIP-123-8K2P` và `SHIP-123-DEMO2` (mỗi mã dùng **một lần**).
 
-> Không có Maven? Mở thư mục `BE` bằng IntelliJ IDEA rồi Run trực tiếp `ColdChainApplication`.
+Xem log / dừng backend:
+
+```bash
+docker compose logs -f backend    # theo dõi log
+docker compose down               # dừng (giữ dữ liệu)
+docker compose down -v            # dừng + xoá sạch DB (reset demo)
+```
+
+> Muốn chạy backend ngoài Docker (dev nhanh): mở `BE` bằng IntelliJ IDEA và Run `ColdChainApplication` (cần JDK 21). Khi đó chỉ bật DB: `docker compose up -d postgres`.
 
 ---
 
@@ -63,6 +71,13 @@ Mở `http://localhost:8080/` sau khi backend chạy. Các màn hình bám theo 
 | **Giám sát** | Telemetry realtime: biểu đồ nhiệt độ/độ ẩm, **lộ trình GPS (2 tab: Sơ đồ offline + Bản đồ)**, pin, RSSI, hash chain, **phát hiện sửa đổi dữ liệu (tamper)** & cảnh báo (Giai đoạn 3) | `GET /api/shipments/{code}/telemetry`, `/alerts` |
 
 **Phát hiện sửa đổi dữ liệu (tamper detection):** mỗi lần gọi `/telemetry`, backend tính lại và đối chiếu: `payload_hash = SHA256(raw_payload)`, các cột hiển thị có khớp `raw_payload` không, `record_hash`, liên kết hash chain, canonical request, và verify lại **chữ ký ECDSA** bằng public key thiết bị. Bản ghi không khớp được đánh dấu `tampered` kèm `integrity_issues`; dashboard tô đỏ dòng đó trong bảng và khoanh đỏ điểm tương ứng trên biểu đồ. Thử nghiệm: sửa thẳng một giá trị trong bảng `telemetry_records` qua pgAdmin/psql → reload tab Giám sát sẽ thấy dòng đó bị gắn cờ.
+
+**Chống insider sửa đổi (tab Toàn vẹn):** hai lớp bổ sung chống người có quyền ghi DB:
+- **HMAC record_hash bằng khóa server ngoài DB** — `record_hash = HMAC-SHA256(INTEGRITY_SECRET, …)`. Khóa đặt qua env `INTEGRITY_SECRET` (không lưu trong DB), nên người chỉ có quyền DB mà không có secret **không tính lại được** hash hợp lệ.
+- **Điểm đối soát ngoài DB (external anchor / notary, append-only)** — `POST /api/admin/integrity/anchor` "công bố" head của hash chain ra bảng append-only + file `data/integrity-anchors.log`. `GET /api/admin/integrity/status` tính lại toàn chuỗi và đối chiếu các điểm đối soát đã công bố; mọi sửa/xoá lịch sử đều làm lệch điểm đối soát. Xem & thao tác ở tab **Toàn vẹn** trên dashboard.
+  - *Ý nghĩa:* HMAC bảo vệ từng bản ghi ngay khi ghi (kể cả chưa có điểm đối soát). Điểm đối soát bảo vệ **toàn bộ lịch sử tính đến lúc công bố** trước kịch bản insider có luôn secret viết lại quá khứ — nên cần tạo/định kỳ để thu hẹp khoảng thời gian chưa được phủ.
+
+> ⚠️ Vì `record_hash` đổi từ SHA256 sang HMAC, **dữ liệu telemetry cũ sẽ bị coi là tampered**. Sau khi cập nhật, hãy reset DB (`docker compose down -v && docker compose up -d`), rebuild backend rồi chạy lại `./scripts/seed-demo.sh` để có baseline sạch. Đặt `INTEGRITY_SECRET` cố định (env) nếu muốn dữ liệu tồn tại qua nhiều lần chạy.
 
 Màn Giám sát tự động làm mới mỗi 5 giây. Các bảng danh sách đều có ô tìm kiếm. Lộ trình GPS có 2 tab: **Sơ đồ** (vẽ canvas, chạy offline) và **Bản đồ** (OpenStreetMap tương tác, vẽ trực tiếp lộ trình — cần internet); kèm nút mở lộ trình trên Google Maps.
 

@@ -1,6 +1,30 @@
 services:
+  # Backend Spring Boot — build ngay trong Docker (không cần cài Maven/JDK trên máy).
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: coldchain-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Trỏ tới service postgres trong cùng network (không phải localhost).
+      DB_URL: jdbc:postgresql://postgres:5432/iot_cold_chain
+      DB_USERNAME: coldchain
+      DB_PASSWORD: coldchain123
+      # Bí mật đặt ngoài DB. Đổi giá trị thật khi triển khai; cố định để dữ liệu tồn tại qua các lần chạy.
+      API_KEY_PEPPER: demo-api-key-pepper-change-me
+      INTEGRITY_SECRET: demo-integrity-secret-change-me
+      INTEGRITY_ANCHOR_LOG: /app/data/integrity-anchors.log
+    ports:
+      - "8080:8080"
+    volumes:
+      - coldchain_data:/app/data
+    restart: unless-stopped
+
   postgres:
-    image: postgres:16
+    image: postgres:15.7-alpine
     container_name: coldchain-postgres
     environment:
       POSTGRES_DB: iot_cold_chain
@@ -16,11 +40,16 @@ services:
       timeout: 5s
       retries: 10
 
+  # pgAdmin là tùy chọn và KHÔNG có image local. Đặt trong profile "tools"
+  # nên `docker compose up -d` sẽ chỉ khởi động postgres, không cố pull pgadmin.
+  # Khi nào có image, chạy: docker compose --profile tools up -d
   pgadmin:
     image: dpage/pgadmin4:8
     container_name: coldchain-pgadmin
+    profiles: ["tools"]
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@coldchain.local
+      # pgAdmin 8 từ chối email đuôi .local -> dùng domain hợp lệ.
+      PGADMIN_DEFAULT_EMAIL: admin@coldchain.com
       PGADMIN_DEFAULT_PASSWORD: admin123
     ports:
       - "5050:80"
@@ -33,3 +62,4 @@ services:
 volumes:
   coldchain_pgdata:
   coldchain_pgadmin:
+  coldchain_data:

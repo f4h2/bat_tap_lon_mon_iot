@@ -161,6 +161,11 @@ tbody tr:hover { background: var(--panel-soft); }
 }
 .badge-tamper { background: var(--err); color: #fff; cursor: help; }
 .badge-intact { background: #e3f6ec; color: var(--ok); }
+.ok-banner {
+  display: flex; align-items: center; gap: 10px;
+  background: #e3f6ec; border: 1px solid #b6e6c9; color: #14683b;
+  padding: 12px 16px; border-radius: 12px; font-weight: 700; font-size: 13.5px; margin-bottom: 16px;
+}
 
 /* ---------- Search ---------- */
 .search {

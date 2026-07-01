@@ -34,6 +34,7 @@ public class ShipmentQueryService {
     private final AlertRepository alertRepository;
     private final DeviceRepository deviceRepository;
     private final SignatureService signatureService;
+    private final RecordHashService recordHashService;
     private final ObjectMapper objectMapper;
 
     public ShipmentQueryService(ShipmentRepository shipmentRepository,
@@ -41,12 +42,14 @@ public class ShipmentQueryService {
                                 AlertRepository alertRepository,
                                 DeviceRepository deviceRepository,
                                 SignatureService signatureService,
+                                RecordHashService recordHashService,
                                 ObjectMapper objectMapper) {
         this.shipmentRepository = shipmentRepository;
         this.telemetryRepository = telemetryRepository;
         this.alertRepository = alertRepository;
         this.deviceRepository = deviceRepository;
         this.signatureService = signatureService;
+        this.recordHashService = recordHashService;
         this.objectMapper = objectMapper;
     }
 
@@ -105,9 +108,9 @@ public class ShipmentQueryService {
             issues.add("PAYLOAD_UNPARSEABLE");
         }
 
-        // 3. record_hash = SHA256(deviceId|timestamp|payloadHash|signature|previousHash)
-        String recomputedRecordHash = HashUtil.sha256Hex(
-                t.getDeviceId() + "|" + t.getDeviceTimestamp() + "|" + t.getPayloadHash() + "|" + t.getSignature() + "|" + t.getPreviousHash());
+        // 3. record_hash = HMAC(secret, deviceId|timestamp|payloadHash|signature|previousHash)
+        String recomputedRecordHash = recordHashService.recordHash(
+                t.getDeviceId(), t.getDeviceTimestamp(), t.getPayloadHash(), t.getSignature(), t.getPreviousHash());
         if (!recomputedRecordHash.equals(t.getRecordHash())) issues.add("RECORD_HASH_MISMATCH");
 
         // 4. Liên kết chuỗi hash giữa các bản ghi

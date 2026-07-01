@@ -26,6 +26,11 @@ app:
     api-key-pepper: ${API_KEY_PEPPER:change-this-secret-in-real-env}
     timestamp-skew-seconds: ${TIMESTAMP_SKEW_SECONDS:300}
     default-signature-algorithm: ${DEFAULT_SIGNATURE_ALGORITHM:SHA256withECDSA}
+    # Bí mật HMAC cho hash chain + anchor. Đặt qua biến môi trường, KHÔNG commit giá trị thật.
+    integrity-secret: ${INTEGRITY_SECRET:change-this-integrity-secret-in-real-env}
+  integrity:
+    # Nơi "công bố" anchor ra ngoài DB (mô phỏng notary/WORM). data/ đã nằm trong .gitignore.
+    anchor-log-path: ${INTEGRITY_ANCHOR_LOG:data/integrity-anchors.log}
 
 springdoc:
   swagger-ui:
