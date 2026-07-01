@@ -23,8 +23,9 @@ static const char* BLE_TARGET_MAC = "";
 static const uint32_t TELEMETRY_INTERVAL_MS = 10000;
 
 // API endpoint (doi thanh backend that cua ban)
-static const char* SERVER_VERIFY_URL    = "http://192.168.1.5:8080/api/devices/verify";
-static const char* SERVER_TELEMETRY_URL = "http://192.168.1.5:8080/api/telemetry";
+static const char* SERVER_VERIFY_URL    = "https://iot.tranbadat.vn/api/devices/verify";   // Pha 1: kích hoạt
+static const char* SERVER_BIND_URL      = "https://iot.tranbadat.vn/api/devices/bind";     // Pha 2: gắn đơn ship
+static const char* SERVER_TELEMETRY_URL = "https://iot.tranbadat.vn/api/telemetry";
 
 // Provisioning placeholder mode
 static const bool ENABLE_SERVER_VERIFY = true;

@@ -100,6 +100,93 @@
     ]);
   }
 
+  // Modal + QR (dùng thư viện qrcode.min.js vendored, chạy offline).
+  function showModal(title, contentNode) {
+    const overlay = h("div", { class: "modal-overlay" });
+    const close = () => overlay.remove();
+    overlay.appendChild(h("div", { class: "modal" }, [
+      h("div", { class: "modal-head" }, [h("div", { class: "panel-title" }, title), h("button", { class: "btn btn-ghost", onclick: close }, "✕")]),
+      contentNode,
+    ]));
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+    return close;
+  }
+  function renderQr(el, text, size) {
+    el.innerHTML = "";
+    if (typeof QRCode === "undefined") { el.textContent = "Thiếu thư viện QR"; return; }
+    try { new QRCode(el, { text: String(text), width: size || 180, height: size || 180, correctLevel: QRCode.CorrectLevel.M }); }
+    catch (e) { el.textContent = "Không tạo được QR"; }
+  }
+  function showQrModal(title, text, hint, deepLink) {
+    const qrBox = h("div", { class: "qr-box" });
+    const codeEl = h("div", { class: "mono", style: "margin-top:12px;font-size:15px;font-weight:800;word-break:break-all" }, text);
+    // Mặc định: QR "mở nhanh" (cho ESP32/điện thoại quét mở portal). QR mã chỉ là tùy chọn phụ.
+    let mode = deepLink ? "link" : "code";
+    const valFor = () => (mode === "link" ? deepLink : text);
+    const copyBtn = h("button", { class: "btn btn-ghost", style: "margin-top:10px", onclick: () => { navigator.clipboard && navigator.clipboard.writeText(valFor()); toast("Đã copy.", "ok"); } }, "⧉ Copy");
+    const label = h("div", { class: "page-sub", style: "margin-top:8px;font-weight:700" }, "");
+    const kids = [qrBox, label, codeEl, copyBtn];
+    let toggle = null;
+    const apply = () => {
+      renderQr(qrBox, valFor(), 200);
+      codeEl.textContent = valFor();
+      label.textContent = mode === "link" ? "⚡ QR mở nhanh (ESP32 quét để mở portal)" : "🔤 QR mã (để đọc & gõ tay)";
+      if (toggle) toggle.textContent = mode === "link" ? "🔤 Đổi sang QR mã (gõ tay)" : "⚡ Đổi sang QR mở nhanh (ESP32)";
+    };
+    if (deepLink) {
+      toggle = h("button", { class: "btn btn-blue", style: "margin-top:10px;margin-left:6px" }, "");
+      toggle.addEventListener("click", () => { mode = mode === "link" ? "code" : "link"; apply(); });
+      kids.push(toggle);
+      kids.push(h("p", { class: "page-sub", style: "margin-top:10px;text-align:left" },
+        "• QR mở nhanh (mặc định): điện thoại ĐÃ nối Wi-Fi \"ESP32-IoT-Setup\", quét bằng camera → mở thẳng portal đã điền sẵn mã.\n• QR mã: quét để đọc ra mã rồi gõ tay vào portal."));
+    } else {
+      kids.push(h("p", { class: "page-sub", style: "margin-top:10px" }, hint || "Quét bằng camera điện thoại để đọc mã, rồi nhập vào portal ESP32."));
+    }
+    showModal(title, h("div", { style: "text-align:center;white-space:pre-line" }, kids));
+    apply();
+  }
+
+  // Điều hướng sang màn Giám sát cho 1 đơn ship (đóng modal nếu đang mở).
+  function goToMonitor(shipmentCode) {
+    document.querySelectorAll(".modal-overlay").forEach((m) => m.remove());
+    monitorState.code = shipmentCode;
+    monitorState.shellFor = null;
+    location.hash = "#/monitor";
+  }
+
+  // Modal chi tiết 1 thiết bị: thông tin + số đơn ship đã phục vụ.
+  async function showDeviceDetail(deviceId) {
+    const body = h("div", { class: "loading" }, "Đang tải…");
+    showModal("Chi tiết thiết bị", body);
+    try {
+      const d = await Api.deviceDetail(deviceId);
+      clear(body); body.className = "";
+      const row = (label, val) => h("div", { class: "chip" }, [h("span", null, label), h("span", { class: "mono" }, val)]);
+      const served = d.shipmentsServed || [];
+      body.appendChild(h("div", { class: "chips" }, [
+        row("Device ID", d.deviceId),
+        row("Trạng thái", d.status),
+        row("Đơn ship hiện tại", d.shipmentCode || "Chưa gắn"),
+        row("Thuật toán ký", d.signatureAlgorithm || "—"),
+        row("Kích hoạt", fmtDateTime(d.activatedAt || d.createdAt)),
+        row("Lần cuối online", d.lastSeenAt ? fmtDateTime(d.lastSeenAt) : "—"),
+        row("Số bản ghi telemetry", String(d.telemetryCount)),
+        row("Số đơn ship đã phục vụ", String(served.length)),
+      ]));
+      body.appendChild(h("div", { class: "panel-title", style: "margin-top:14px;font-size:14px" }, "Đơn ship đã phục vụ"));
+      if (served.length) {
+        body.appendChild(h("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-top:8px" },
+          served.map((sc) => h("button", { class: "btn btn-ghost", style: "font-size:12px;padding:4px 10px", onclick: () => goToMonitor(sc) }, "🔎 " + sc))));
+      } else {
+        body.appendChild(h("p", { class: "page-sub", style: "margin-top:8px" }, "Chưa gửi telemetry cho đơn ship nào."));
+      }
+    } catch (e) {
+      clear(body); body.className = "";
+      body.appendChild(h("p", { class: "page-sub" }, e instanceof Api.ApiError ? e.message : "Lỗi tải chi tiết thiết bị"));
+    }
+  }
+
   /* Các điểm chủ quyền Việt Nam ghi đè lên bản đồ (OSM thiếu nhãn 2 quần đảo này). */
   const VN_ISLANDS = [
     { name: "Quần đảo Hoàng Sa (Việt Nam)", lat: 16.5, lng: 112.0 },
@@ -200,13 +287,23 @@
       ctx.fillText(v.toFixed(0) + "%", W - padR + 6, yH(v));
     }
 
-    // dải ngưỡng nhiệt độ cho phép
+    // dải ngưỡng nhiệt độ cho phép (trục trái, xanh lá)
     if (band) {
       ctx.fillStyle = "rgba(31,157,85,.10)";
       const yTop = yT(band.max), yBot = yT(band.min);
       ctx.fillRect(padL, Math.min(yTop, yBot), plotW, Math.abs(yBot - yTop));
       ctx.strokeStyle = "rgba(31,157,85,.45)"; ctx.setLineDash([4, 4]);
       [band.min, band.max].forEach((v) => { const yy = yT(v); ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke(); });
+      ctx.setLineDash([]);
+    }
+
+    // dải ngưỡng độ ẩm cho phép (trục phải, xanh dương)
+    if (band && band.minHum != null && band.maxHum != null) {
+      ctx.fillStyle = "rgba(31,111,235,.07)";
+      const yTop = yH(band.maxHum), yBot = yH(band.minHum);
+      ctx.fillRect(padL, Math.min(yTop, yBot), plotW, Math.abs(yBot - yTop));
+      ctx.strokeStyle = "rgba(31,111,235,.38)"; ctx.setLineDash([4, 4]);
+      [band.minHum, band.maxHum].forEach((v) => { const yy = yH(v); ctx.beginPath(); ctx.moveTo(padL, yy); ctx.lineTo(W - padR, yy); ctx.stroke(); });
       ctx.setLineDash([]);
     }
 
@@ -228,6 +325,15 @@
       points.forEach((p, i) => {
         if (p.t != null && (p.t < band.min || p.t > band.max)) {
           ctx.fillStyle = "#c53030"; ctx.beginPath(); ctx.arc(x(i), yT(p.t), 3.5, 0, Math.PI * 2); ctx.fill();
+        }
+      });
+    }
+
+    // điểm độ ẩm vi phạm ngưỡng -> chấm đỏ (trên đường độ ẩm)
+    if (band && band.minHum != null && band.maxHum != null) {
+      points.forEach((p, i) => {
+        if (p.h != null && (p.h < band.minHum || p.h > band.maxHum)) {
+          ctx.fillStyle = "#c53030"; ctx.beginPath(); ctx.arc(x(i), yH(p.h), 3.5, 0, Math.PI * 2); ctx.fill();
         }
       });
     }
@@ -508,15 +614,19 @@
     setHeader("Chuyến hàng", "Tạo lô hàng và thiết lập ngưỡng nhiệt độ / độ ẩm cho phép.");
     setLoading();
     try {
-      const list = await Api.listShipments();
+      const [list, devices] = await Promise.all([Api.listShipments(), Api.listDevices()]);
       clear(view);
+
+      // map: shipmentCode -> [deviceId] (thiết bị đang gắn đơn đó)
+      const devMap = {};
+      devices.forEach((d) => { if (d.shipmentCode) (devMap[d.shipmentCode] = devMap[d.shipmentCode] || []).push(d.deviceId); });
 
       const tableHost = h("div");
       const count = h("small", null, list.length + " lô");
       const render = (q) => {
         const rows = list.filter((s) => matches([s.shipmentCode, s.itemType, s.status], q));
         count.textContent = (q ? rows.length + "/" + list.length : list.length) + " lô";
-        clear(tableHost); tableHost.appendChild(shipmentsTable(rows));
+        clear(tableHost); tableHost.appendChild(shipmentsTable(rows, devMap));
       };
 
       view.appendChild(h("div", { class: "grid-2" }, [
@@ -538,18 +648,32 @@
     } catch (err) { showError(err); }
   }
 
-  function shipmentsTable(list) {
+  function shipmentsTable(list, devMap) {
+    devMap = devMap || {};
     if (!list.length) return h("div", { class: "empty" }, "Chưa có chuyến hàng nào.");
     return h("div", { style: "overflow-x:auto" }, h("table", null, [
-      h("thead", null, h("tr", null, ["Mã", "Loại hàng", "Nhiệt độ (°C)", "Độ ẩm (%)", "Trạng thái", "Tạo lúc", "Hành động"].map((t) => h("th", null, t)))),
+      h("thead", null, h("tr", null, ["Mã", "Loại hàng", "Nhiệt độ (°C)", "Độ ẩm (%)", "Thiết bị gắn", "Trạng thái", "Tạo lúc", "Hành động"].map((t) => h("th", null, t)))),
       h("tbody", null, list.map((s) => h("tr", null, [
-        h("td", null, h("span", { class: "mono" }, s.shipmentCode)),
+        h("td", null, h("span", { class: "mono link", title: "Xem giám sát", onclick: () => goToMonitor(s.shipmentCode) }, s.shipmentCode)),
         h("td", null, s.itemType),
         h("td", null, `${num(s.minTemperature)} ÷ ${num(s.maxTemperature)}`),
         h("td", null, `${num(s.minHumidity)} ÷ ${num(s.maxHumidity)}`),
+        h("td", null, (devMap[s.shipmentCode] && devMap[s.shipmentCode].length)
+          ? h("div", { style: "display:flex;flex-direction:column;gap:2px" }, devMap[s.shipmentCode].map((did) =>
+              h("span", { class: "mono link", style: "font-size:12px", title: "Chi tiết thiết bị", onclick: () => showDeviceDetail(did) }, short(did, 16))))
+          : h("span", { class: "badge badge-muted" }, "Chưa có")),
         h("td", null, statusBadge(s.status)),
         h("td", null, fmtDateTime(s.createdAt)),
-        h("td", null, s.status === 'ACTIVE' ? h("button", {
+        h("td", null, [
+          h("button", {
+            class: "btn btn-blue", style: "font-size:11px;padding:2px 8px;margin-right:6px",
+            onclick: () => goToMonitor(s.shipmentCode),
+          }, "🔎 Giám sát"),
+          h("button", {
+            class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px;margin-right:6px",
+            onclick: () => showQrModal("QR đơn ship " + s.shipmentCode, s.shipmentCode, null, "http://192.168.4.1/monitor?ship=" + encodeURIComponent(s.shipmentCode)),
+          }, "QR gắn đơn"),
+          s.status === 'ACTIVE' ? h("button", {
             class: "btn btn-ghost",
             style: "font-size: 11px; padding: 2px 6px;",
             onclick: async () => {
@@ -563,7 +687,8 @@
                     }
                 }
             }
-        }, "Kết thúc") : "")
+        }, "Kết thúc") : "",
+        ]),
       ]))),
     ]));
   }
@@ -615,22 +740,22 @@
 
   /* ---- Mã kích hoạt ---- */
   async function viewCodes() {
-    setHeader("Mã kích hoạt", "Sinh & quản lý verify code cấp cho thiết bị ESP32 (Giai đoạn 1).");
+    setHeader("Mã kích hoạt thiết bị", "Sinh mã để ESP32 đăng ký (kích hoạt) vào hệ thống — Pha 1, không thuộc đơn ship.");
     setLoading();
     try {
-      const [shipments, codes] = await Promise.all([Api.listShipments(), Api.listVerifyCodes()]);
+      const codes = await Api.listVerifyCodes();
       clear(view);
 
       const resultBox = h("div");
 
-      // ----- danh sách verify code (phải) -----
+      // ----- danh sách mã kích hoạt (phải) -----
       let codesData = codes, curQuery = "", curStatus = "ALL";
       const listHost = h("div");
       const count = h("small", null, codes.length + " mã");
       const renderList = () => {
         const rows = codesData.filter((c) =>
           (curStatus === "ALL" || codeDisplayStatus(c) === curStatus) &&
-          matches([c.verifyCode, c.shipmentCode, codeDisplayStatus(c), c.usedByDeviceId], curQuery));
+          matches([c.verifyCode, codeDisplayStatus(c), c.usedByDeviceId], curQuery));
         count.textContent = (curQuery || curStatus !== "ALL" ? rows.length + "/" + codesData.length : codesData.length) + " mã";
         clear(listHost); listHost.appendChild(verifyCodesTable(rows));
       };
@@ -642,31 +767,24 @@
         return b;
       });
 
-      // ----- form sinh mã (trái) -----
-      const select = h("select", { name: "shipmentCode", required: "required" },
-        shipments.length
-          ? shipments.map((s) => h("option", { value: s.shipmentCode }, `${s.shipmentCode} — ${s.itemType}`))
-          : [h("option", { value: "" }, "(chưa có chuyến hàng)")]);
-
+      // ----- form sinh mã kích hoạt (trái) -----
       const form = h("form", null, [
         h("div", { class: "form-grid" }, [
-          h("div", { class: "field full" }, [h("label", null, "Chuyến hàng *"), select]),
-          h("div", { class: "field" }, [h("label", null, "Hết hạn sau (ngày)"), h("input", { name: "expiresInDays", type: "number", min: "1", value: "7" }), h("span", { class: "hint" }, "Mặc định 7 ngày nếu để trống.")]),
+          h("div", { class: "field" }, [h("label", null, "Hết hạn sau (ngày)"), h("input", { name: "expiresInDays", type: "number", min: "1", value: "30" }), h("span", { class: "hint" }, "Mặc định 30 ngày.")]),
         ]),
         h("div", { class: "form-actions" }, [h("button", { type: "submit", class: "btn btn-blue" }, "⌗ Sinh mã kích hoạt")]),
       ]);
       form.addEventListener("submit", async (ev) => {
         ev.preventDefault();
         const data = Object.fromEntries(new FormData(form).entries());
-        if (!data.shipmentCode) { toast("Hãy tạo chuyến hàng trước.", "err"); return; }
-        const payload = { shipmentCode: data.shipmentCode };
+        const payload = {};
         if (data.expiresInDays) payload.expiresInDays = Number(data.expiresInDays);
         const btn = form.querySelector("button");
         btn.disabled = true;
         try {
           const vc = await Api.generateCode(payload);
           renderCodeResult(resultBox, vc);
-          toast("Đã sinh mã " + vc.verifyCode, "ok");
+          toast("Đã sinh mã kích hoạt " + vc.verifyCode, "ok");
           await reload();
         } catch (err) {
           toast(err instanceof Api.ApiError ? err.message : "Sinh mã thất bại", "err");
@@ -675,15 +793,15 @@
 
       view.appendChild(h("div", { class: "grid-2" }, [
         h("div", { class: "panel" }, [
-          h("div", { class: "panel-title" }, "Sinh mã mới"),
+          h("div", { class: "panel-title" }, "Sinh mã kích hoạt mới"),
           form,
           resultBox,
-          h("p", { class: "page-sub", style: "margin-top:12px" }, "Nhập mã vào Web Portal của ESP32 (bước Verify) để hoàn tất provisioning."),
+          h("p", { class: "page-sub", style: "margin-top:12px" }, "ESP32 nhập/quét mã này ở bước Kích hoạt để gia nhập hệ thống. Gắn đơn ship là bước riêng (QR đơn ship ở tab Chuyến hàng)."),
         ]),
         h("div", { class: "panel" }, [
           h("div", { class: "panel-head" }, [
             h("div", { class: "panel-title" }, ["Danh sách mã kích hoạt ", count]),
-            searchBox("Tìm mã / chuyến hàng / thiết bị…", (q) => { curQuery = q; renderList(); }),
+            searchBox("Tìm mã / thiết bị…", (q) => { curQuery = q; renderList(); }),
           ]),
           h("div", { class: "tabs", style: "margin-bottom:12px" }, filterBtns),
           listHost,
@@ -702,48 +820,63 @@
   function verifyCodesTable(list) {
     if (!list.length) return h("div", { class: "empty" }, "Không có mã phù hợp.");
     return h("div", { style: "overflow-x:auto" }, h("table", null, [
-      h("thead", null, h("tr", null, ["Mã", "Chuyến hàng", "Trạng thái", "Hết hạn", "Dùng bởi"].map((t) => h("th", null, t)))),
+      h("thead", null, h("tr", null, ["Mã kích hoạt", "Trạng thái", "Hết hạn", "Dùng bởi", "QR"].map((t) => h("th", null, t)))),
       h("tbody", null, list.map((c) => h("tr", null, [
         h("td", null, h("span", { class: "mono" }, c.verifyCode)),
-        h("td", null, h("span", { class: "mono" }, c.shipmentCode)),
         h("td", null, statusBadge(codeDisplayStatus(c))),
         h("td", null, fmtDateTime(c.expiresAt)),
         h("td", null, c.usedByDeviceId ? h("span", { class: "mono" }, short(c.usedByDeviceId, 14)) : "—"),
+        h("td", null, codeDisplayStatus(c) === "UNUSED"
+          ? h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px", onclick: () => showQrModal("QR mã kích hoạt", c.verifyCode, null, "http://192.168.4.1/?vcode=" + encodeURIComponent(c.verifyCode)) }, "QR")
+          : "—"),
       ]))),
     ]));
   }
 
   function renderCodeResult(box, vc) {
     clear(box);
+    const qrBox = h("div", { class: "qr-box" });
     box.appendChild(h("div", { class: "code-result" }, [
-      h("div", { class: "meta" }, "Mã kích hoạt cho " + vc.shipmentCode),
+      h("div", { class: "meta" }, "Mã kích hoạt thiết bị"),
       h("div", { class: "code" }, vc.verifyCode),
       h("div", { class: "meta" }, "Trạng thái: " + (vc.status || "UNUSED") + " · Hết hạn: " + fmtDateTime(vc.expiresAt)),
+      h("div", { class: "meta", style: "margin-top:8px" }, "⚡ QR mở nhanh — ESP32 (đã nối Wi-Fi) quét để mở portal điền sẵn mã"),
+      h("div", { style: "display:flex;justify-content:center;margin-top:8px" }, qrBox),
       h("button", {
         class: "btn btn-ghost", style: "margin-top:12px",
         onclick: () => { navigator.clipboard && navigator.clipboard.writeText(vc.verifyCode); toast("Đã copy mã.", "ok"); },
       }, "⧉ Copy mã"),
     ]));
+    renderQr(qrBox, "http://192.168.4.1/?vcode=" + encodeURIComponent(vc.verifyCode), 150);
   }
 
   /* ---- Thiết bị ---- */
   async function viewDevices() {
-    setHeader("Thiết bị", "Các ESP32 đã provisioning thành công (Giai đoạn 2).");
+    setHeader("Thiết bị", "Thiết bị đã kích hoạt (Pha 1) và đơn ship đang gắn (Pha 2).");
     setLoading();
     try {
-      const list = await Api.listDevices();
+      const [list, shipments] = await Promise.all([Api.listDevices(), Api.listShipments()]);
       clear(view);
+
+      const bound = list.filter((d) => d.shipmentCode).length;
+      view.appendChild(h("div", { class: "kpi-grid", style: "grid-template-columns:repeat(3,1fr);margin-bottom:16px" }, [
+        kpiCard("Tổng thiết bị", list.length, "Đã kích hoạt vào hệ thống"),
+        kpiCard("Đang gắn đơn ship", bound, "Có đơn ship hiện tại"),
+        kpiCard("Chưa gắn", list.length - bound, "Chờ gắn đơn ship"),
+      ]));
+
       const tableHost = h("div");
       const count = h("small", null, list.length + " thiết bị");
+      const reload = () => viewDevices();
       const render = (q) => {
         const rows = list.filter((d) => matches([d.deviceId, d.shipmentCode, d.status, d.signatureAlgorithm], q));
         count.textContent = (q ? rows.length + "/" + list.length : list.length) + " thiết bị";
-        clear(tableHost); tableHost.appendChild(devicesTable(rows));
+        clear(tableHost); tableHost.appendChild(devicesTable(rows, shipments, reload));
       };
       view.appendChild(h("div", { class: "panel" }, [
         h("div", { class: "panel-head" }, [
-          h("div", { class: "panel-title" }, ["Thiết bị đã đăng ký ", count]),
-          searchBox("Tìm device id / chuyến hàng / trạng thái…", render),
+          h("div", { class: "panel-title" }, ["Thiết bị đã kích hoạt ", count]),
+          searchBox("Tìm device id / đơn ship / trạng thái…", render),
         ]),
         tableHost,
       ]));
@@ -751,23 +884,50 @@
     } catch (err) { showError(err); }
   }
 
-  function devicesTable(list) {
-    if (!list.length) return h("div", { class: "empty" }, "Không có thiết bị phù hợp. (Nạp firmware ESP32 + nhập verify code để provisioning.)");
+  function devicesTable(list, shipments, reload) {
+    if (!list.length) return h("div", { class: "empty" }, "Chưa có thiết bị nào kích hoạt. (Nạp firmware ESP32 + nhập mã kích hoạt.)");
     return h("div", { style: "overflow-x:auto" }, h("table", null, [
-      h("thead", null, h("tr", null, ["Device ID", "Chuyến hàng", "Thuật toán ký", "Trạng thái", "Đăng ký", "Lần cuối online"].map((t) => h("th", null, t)))),
+      h("thead", null, h("tr", null, ["Device ID", "Đơn ship hiện tại", "Thuật toán ký", "Trạng thái", "Kích hoạt", "Lần cuối online", "Gắn đơn ship"].map((t) => h("th", null, t)))),
       h("tbody", null, list.map((d) => h("tr", null, [
-        h("td", null, h("span", { class: "mono" }, d.deviceId)),
-        h("td", null, h("span", { class: "mono" }, d.shipmentCode)),
+        h("td", null, h("span", { class: "mono link", title: "Xem chi tiết", onclick: () => showDeviceDetail(d.deviceId) }, d.deviceId)),
+        h("td", null, d.shipmentCode ? h("span", { class: "mono link", title: "Xem giám sát", onclick: () => goToMonitor(d.shipmentCode) }, d.shipmentCode) : h("span", { class: "badge badge-muted" }, "Chưa gắn")),
         h("td", null, h("span", { class: "badge badge-info" }, d.signatureAlgorithm || "—")),
         h("td", null, statusBadge(d.status)),
-        h("td", null, fmtDateTime(d.createdAt)),
+        h("td", null, fmtDateTime(d.activatedAt || d.createdAt)),
         h("td", null, [relTime(d.lastSeenAt), h("div", { class: "page-sub", style: "font-size:11px" }, d.lastSeenAt ? fmtDateTime(d.lastSeenAt) : "")]),
+        h("td", null, deviceBindControl(d, shipments, reload)),
       ]))),
     ]));
   }
 
+  function deviceBindControl(d, shipments, reload) {
+    const active = (shipments || []).filter((s) => s.status === "ACTIVE");
+    const select = h("select", { style: "font-size:12px;padding:4px 6px;max-width:150px" }, [
+      h("option", { value: "" }, "— chọn đơn —"),
+      ...active.map((s) => h("option", { value: s.shipmentCode, selected: s.shipmentCode === d.shipmentCode ? "selected" : null }, s.shipmentCode)),
+    ]);
+    const bindBtn = h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px;margin-left:4px" }, "Gắn");
+    bindBtn.addEventListener("click", async () => {
+      if (!select.value) { toast("Chọn đơn ship trước.", "err"); return; }
+      bindBtn.disabled = true;
+      try { await Api.bindDevice(d.deviceId, select.value); toast("Đã gắn " + d.deviceId + " → " + select.value, "ok"); reload(); }
+      catch (e) { toast(e instanceof Api.ApiError ? e.message : "Gắn thất bại", "err"); bindBtn.disabled = false; }
+    });
+    const kids = [select, bindBtn];
+    if (d.shipmentCode) {
+      const unbind = h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px;margin-left:4px" }, "Bỏ gắn");
+      unbind.addEventListener("click", async () => {
+        unbind.disabled = true;
+        try { await Api.bindDevice(d.deviceId, null); toast("Đã bỏ gắn " + d.deviceId, "ok"); reload(); }
+        catch (e) { toast(e instanceof Api.ApiError ? e.message : "Lỗi", "err"); unbind.disabled = false; }
+      });
+      kids.push(unbind);
+    }
+    return h("div", { style: "display:flex;align-items:center;flex-wrap:wrap;gap:3px" }, kids);
+  }
+
   /* ---- Giám sát (telemetry + GPS + cảnh báo) ---- */
-  let monitorState = { code: null, shellFor: null, refs: null, gpsTab: "canvas", gpsMap: null, gpsRouteLayer: null, lastCoords: [], gpsFitted: false, roadRoute: null, roadRouteKey: null, roadRouteFetching: null };
+  let monitorState = { code: null, shellFor: null, refs: null, gpsTab: "map", gpsMap: null, gpsRouteLayer: null, lastCoords: [], gpsFitted: false, roadRoute: null, roadRouteKey: null, roadRouteFetching: null };
 
   async function viewMonitor() {
     setHeader("Giám sát", "Telemetry thời gian thực: nhiệt độ, độ ẩm, định vị GPS, pin, tín hiệu & cảnh báo.");
@@ -855,7 +1015,7 @@
 
     const chartCanvas = h("canvas");
     const chartPanel = h("div", { class: "panel", style: "margin-top:16px;box-shadow:none;border-color:#eef2f7" }, [
-      h("div", { class: "panel-title" }, ["Biểu đồ nhiệt độ & độ ẩm ", h("small", null, band ? `ngưỡng cho phép ${band.min}÷${band.max}°C` : "")]),
+      h("div", { class: "panel-title" }, ["Biểu đồ nhiệt độ & độ ẩm ", h("small", null, band ? `ngưỡng: ${band.min}÷${band.max}°C · độ ẩm ${band.minHum != null ? band.minHum + "÷" + band.maxHum + "%" : "—"}` : "")]),
       h("div", { class: "chart-wrap" }, chartCanvas),
       h("div", { class: "legend" }, [h("span", { class: "l-temp" }, "Nhiệt độ (°C)"), h("span", { class: "l-hum" }, "Độ ẩm (%)"), h("span", { style: "color:#c53030" }, "● Vi phạm ngưỡng"), h("span", { style: "color:#c53030" }, "◯ Bị sửa đổi")]),
     ]);
@@ -881,8 +1041,8 @@
     tabMapBtn.addEventListener("click", () => setTab("map"));
 
     const gpsPanel = h("div", { class: "panel", style: "box-shadow:none;border-color:#eef2f7" }, [
-      h("div", { class: "panel-head" }, [h("div", { class: "panel-title" }, "Lộ trình GPS"), h("div", { class: "tabs" }, [tabCanvasBtn, tabMapBtn])]),
-      canvasPane, mapPane, dirBtnHost,
+      h("div", { class: "panel-head" }, [h("div", { class: "panel-title" }, "Lộ trình GPS"), h("div", { class: "tabs" }, [tabMapBtn, tabCanvasBtn])]),
+      mapPane, canvasPane, dirBtnHost,
     ]);
 
     // Risk Panel

@@ -4,12 +4,20 @@ Tai lieu nay dung cho phan firmware ESP32 trong thu muc `IoT`.
 
 ## File code chinh
 
-- Sketch de upload (mo trong Arduino IDE): `IoT/ESP32_IoT_Device/ESP32_IoT_Device.ino`
-- Firmware thuc te: `IoT/main/main.ino`
-- Cau hinh: `IoT/main/Config.h`
-- Giao dien provisioning: `IoT/main/WebPortal.h`
+Sketch nam gon trong 1 thu muc `IoT/main/`. Mo trong Arduino IDE bang cach mo
+**`IoT/main/main.ino`** -> se hien 3 tab: `main.ino`, `Config.h`, `WebPortal.h`.
 
-Ghi chu: `ESP32_IoT_Device.ino` da include truc tiep `../main/main.ino`, nen upload tu sketch nay se chay dung firmware that.
+- Firmware chinh: `IoT/main/main.ino`
+- Cau hinh (sua IP server o day): `IoT/main/Config.h`
+- Giao dien portal (kich hoat / gan don ship / monitor): `IoT/main/WebPortal.h`
+
+Luu y Arduino IDE: 1 sketch = 1 thu muc, file `.ino` chinh phai trung ten thu muc,
+va tat ca file `.ino`/`.h` trong cung thu muc moi duoc bien dich chung. Vi vay phai
+mo `main/main.ino` (khong mo file don le o noi khac).
+
+## Mo phong khong can phan cung
+
+Neu chua co mach ESP32, dung simulator tren PC: xem `IoT/simulator/README.md`.
 
 ## Provisioning flow
 

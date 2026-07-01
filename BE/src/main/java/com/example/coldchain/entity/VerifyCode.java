@@ -11,7 +11,8 @@ public class VerifyCode {
     @Column(name = "verify_code", nullable = false, length = 128)
     private String verifyCode;
 
-    @Column(name = "shipment_code", nullable = false, length = 64)
+    // Mã kích hoạt thiết bị không thuộc đơn ship nào -> null.
+    @Column(name = "shipment_code", length = 64)
     private String shipmentCode;
 
     @Enumerated(EnumType.STRING)

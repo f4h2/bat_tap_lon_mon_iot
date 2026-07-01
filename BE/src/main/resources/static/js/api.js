@@ -42,22 +42,28 @@
     }
   }
 
+  // Các endpoint list trả về Page {content:[...]} -> tự bóc .content thành mảng cho FE.
+  const unwrap = (r) => (r && Array.isArray(r.content) ? r.content : r);
+
   const Api = {
     ApiError,
     // Dashboard
     stats: () => request("GET", "/api/admin/dashboard/stats"),
     // Shipments
-    listShipments: () => request("GET", "/api/admin/shipments?size=100"),
+    listShipments: () => request("GET", "/api/admin/shipments?size=200").then(unwrap),
     createShipment: (payload) => request("POST", "/api/admin/shipments", payload),
     updateShipmentStatus: (code, status) => request("PUT", "/api/admin/shipments/" + encodeURIComponent(code) + "/status", { status }),
     // Devices
-    listDevices: () => request("GET", "/api/admin/devices?size=100"),
-    // Verify codes
-    listVerifyCodes: () => request("GET", "/api/admin/verify-codes?size=100"),
+    listDevices: () => request("GET", "/api/admin/devices?size=200").then(unwrap),
+    deviceDetail: (deviceId) => request("GET", "/api/admin/devices/" + encodeURIComponent(deviceId)),
+    // Admin gán/bỏ gắn đơn ship cho thiết bị (shipmentCode null = bỏ gắn)
+    bindDevice: (deviceId, shipmentCode) => request("PUT", "/api/admin/devices/" + encodeURIComponent(deviceId) + "/shipment", { shipment_code: shipmentCode || null }),
+    // Activation codes (mã kích hoạt thiết bị)
+    listVerifyCodes: () => request("GET", "/api/admin/verify-codes?size=200").then(unwrap),
     generateCode: (payload) => request("POST", "/api/admin/devices/generate-code", payload),
     // Per-shipment monitoring
-    telemetry: (code) => request("GET", "/api/shipments/" + encodeURIComponent(code) + "/telemetry?size=500"),
-    alerts: (code) => request("GET", "/api/shipments/" + encodeURIComponent(code) + "/alerts?size=100"),
+    telemetry: (code) => request("GET", "/api/shipments/" + encodeURIComponent(code) + "/telemetry?size=500").then(unwrap),
+    alerts: (code) => request("GET", "/api/shipments/" + encodeURIComponent(code) + "/alerts?size=200").then(unwrap),
     // Integrity / notary
     integrityStatus: () => request("GET", "/api/admin/integrity/status"),
     createAnchor: () => request("POST", "/api/admin/integrity/anchor"),

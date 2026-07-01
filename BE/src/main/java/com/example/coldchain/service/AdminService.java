@@ -1,9 +1,11 @@
 package com.example.coldchain.service;
 
+import com.example.coldchain.dto.admin.AdminBindRequest;
 import com.example.coldchain.dto.admin.CreateShipmentRequest;
 import com.example.coldchain.dto.admin.DashboardStatsResponse;
 import com.example.coldchain.dto.admin.DeviceAdminResponse;
-import com.example.coldchain.dto.admin.GenerateVerifyCodeRequest;
+import com.example.coldchain.dto.admin.GenerateActivationCodeRequest;
+import com.example.coldchain.entity.Device;
 import com.example.coldchain.entity.Shipment;
 import com.example.coldchain.entity.VerifyCode;
 import com.example.coldchain.entity.enums.DeviceStatus;
@@ -33,15 +35,28 @@ public class AdminService {
     private final ShipmentRepository shipmentRepository;
     private final VerifyCodeRepository verifyCodeRepository;
     private final AlertRepository alertRepository;
+    private final com.example.coldchain.repository.TelemetryRecordRepository telemetryRepository;
 
     public AdminService(DeviceRepository deviceRepository,
                         ShipmentRepository shipmentRepository,
                         VerifyCodeRepository verifyCodeRepository,
-                        AlertRepository alertRepository) {
+                        AlertRepository alertRepository,
+                        com.example.coldchain.repository.TelemetryRecordRepository telemetryRepository) {
         this.deviceRepository = deviceRepository;
         this.shipmentRepository = shipmentRepository;
         this.verifyCodeRepository = verifyCodeRepository;
         this.alertRepository = alertRepository;
+        this.telemetryRepository = telemetryRepository;
+    }
+
+    public com.example.coldchain.dto.admin.DeviceDetailResponse getDeviceDetail(String deviceId) {
+        Device d = deviceRepository.findById(deviceId)
+                .orElseThrow(() -> ApiException.badRequest("DEVICE_NOT_FOUND", "Device not found"));
+        java.util.List<String> served = telemetryRepository.findDistinctShipmentCodesByDeviceId(deviceId);
+        long telemetryCount = telemetryRepository.countByDeviceId(deviceId);
+        return new com.example.coldchain.dto.admin.DeviceDetailResponse(
+                d.getDeviceId(), d.getShipmentCode(), d.getSignatureAlgorithm(), d.getStatus(),
+                d.getCreatedAt(), d.getActivatedAt(), d.getLastSeenAt(), served, telemetryCount);
     }
 
     public Page<DeviceAdminResponse> getDevices(Pageable pageable) {
@@ -89,21 +104,36 @@ public class AdminService {
         return shipmentRepository.save(shipment);
     }
 
+    // PHA 1 — sinh MÃ KÍCH HOẠT thiết bị (không thuộc đơn ship).
     @Transactional
-    public VerifyCode generateVerifyCode(GenerateVerifyCodeRequest request) {
-        if (!shipmentRepository.existsById(request.shipmentCode())) {
-            throw ApiException.badRequest("SHIPMENT_NOT_FOUND", "Shipment not found");
+    public VerifyCode generateActivationCode(GenerateActivationCodeRequest request) {
+        String code = "ACT-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
+        VerifyCode activation = new VerifyCode();
+        activation.setVerifyCode(code);
+        activation.setShipmentCode(null);
+        activation.setStatus(VerifyCodeStatus.UNUSED);
+        int days = request.expiresInDays() != null ? request.expiresInDays() : 30;
+        activation.setExpiresAt(Instant.now().plus(days, ChronoUnit.DAYS));
+        return verifyCodeRepository.save(activation);
+    }
+
+    // PHA 2 (admin-driven) — gán / bỏ gắn đơn ship cho thiết bị.
+    @Transactional
+    public Device bindDeviceShipment(String deviceId, AdminBindRequest request) {
+        Device device = deviceRepository.findById(deviceId)
+                .orElseThrow(() -> ApiException.badRequest("DEVICE_NOT_FOUND", "Device not found"));
+        String sc = request.shipmentCode();
+        if (sc == null || sc.isBlank()) {
+            device.setShipmentCode(null); // bỏ gắn
+        } else {
+            Shipment shipment = shipmentRepository.findById(sc.trim())
+                    .orElseThrow(() -> ApiException.badRequest("SHIPMENT_NOT_FOUND", "Shipment not found"));
+            if (shipment.getStatus() != ShipmentStatus.ACTIVE) {
+                throw ApiException.badRequest("SHIPMENT_NOT_ACTIVE", "Shipment is " + shipment.getStatus());
+            }
+            device.setShipmentCode(shipment.getShipmentCode());
         }
-        String code = request.shipmentCode() + "-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
-        VerifyCode verifyCode = new VerifyCode();
-        verifyCode.setVerifyCode(code);
-        verifyCode.setShipmentCode(request.shipmentCode());
-        verifyCode.setStatus(VerifyCodeStatus.UNUSED);
-        
-        int days = request.expiresInDays() != null ? request.expiresInDays() : 7;
-        verifyCode.setExpiresAt(Instant.now().plus(days, ChronoUnit.DAYS));
-        
-        return verifyCodeRepository.save(verifyCode);
+        return deviceRepository.save(device);
     }
 
     public DashboardStatsResponse getDashboardStats() {

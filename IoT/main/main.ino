@@ -1,3 +1,7 @@
+// mbedTLS 3.x (ESP32 core 3.x): cho phép truy cập field nội bộ (.d/.grp/.Q) của struct crypto.
+// PHẢI đặt trước mọi #include (kể cả HTTPClient/BLE vốn kéo theo mbedtls).
+#define MBEDTLS_ALLOW_PRIVATE_ACCESS
+
 #include <DHT.h>
 #include <TinyGPS++.h>
 #include <HardwareSerial.h>
@@ -7,6 +11,7 @@
 #include <BLEAdvertisedDevice.h>
 #include <Preferences.h>
 #include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <time.h>
 
@@ -109,7 +114,7 @@ static void saveCredentials() {
 }
 
 static bool connectToWiFi(const char* ssid, const char* pass) {
-  WiFi.mode(WIFI_STA);
+  WiFi.mode(WIFI_AP_STA);   // giữ AP để trang portal/monitor luôn truy cập được (quản lý, đổi đơn ship)
   WiFi.begin(ssid, pass);
 
   Serial.print("[Wi-Fi] Dang ket noi");
@@ -273,7 +278,7 @@ static bool signWithPrivateKeyBase64(const String& data, const uint8_t* priv_key
   size_t der_len = 0;
   if (rc == 0) {
     rc = mbedtls_ecdsa_write_signature(&ecdsa, MBEDTLS_MD_SHA256, hash, sizeof(hash),
-                                       der_sig, &der_len, mbedtls_ctr_drbg_random, &ctr_drbg);
+                                       der_sig, sizeof(der_sig), &der_len, mbedtls_ctr_drbg_random, &ctr_drbg);
   }
 
   unsigned char b64_sig[192];
@@ -311,7 +316,18 @@ static void assignPlaceholderApiKey(const String& publicKeyPem) {
   String h = sha256Hex(seed);
   String apiKey = "demo_" + h.substring(0, 48);
   safeCopyChars(credentials.api_key, sizeof(credentials.api_key), apiKey);
-  safeCopyChars(credentials.shipment_code, sizeof(credentials.shipment_code), DEFAULT_SHIPMENT_CODE);
+  credentials.shipment_code[0] = '\0';  // kích hoạt xong nhưng chưa gắn đơn ship
+}
+
+// Bắt đầu HTTPClient cho cả http lẫn https. Với https, bỏ qua kiểm tra chứng chỉ (demo).
+// Production nên nạp CA thật: g_secureClient.setCACert(root_ca) thay cho setInsecure().
+static WiFiClientSecure g_secureClient;
+static bool beginHttp(HTTPClient& http, const char* url) {
+  if (strncmp(url, "https", 5) == 0) {
+    g_secureClient.setInsecure();
+    return http.begin(g_secureClient, url);
+  }
+  return http.begin(url);
 }
 
 static bool callAPIVerify(const String& publicKeyPem) {
@@ -332,7 +348,7 @@ static bool callAPIVerify(const String& publicKeyPem) {
   }
 
   HTTPClient http;
-  http.begin(SERVER_VERIFY_URL);
+  beginHttp(http, SERVER_VERIFY_URL);
   http.addHeader("Content-Type", "application/json");
 
   StaticJsonDocument<512> doc;
@@ -352,11 +368,7 @@ static bool callAPIVerify(const String& publicKeyPem) {
     StaticJsonDocument<384> respDoc;
     if (deserializeJson(respDoc, resp) == DeserializationError::Ok && respDoc["api_key"]) {
       safeCopyChars(credentials.api_key, sizeof(credentials.api_key), (const char*)respDoc["api_key"]);
-      if (respDoc["shipment_code"]) {
-        safeCopyChars(credentials.shipment_code, sizeof(credentials.shipment_code), (const char*)respDoc["shipment_code"]);
-      } else {
-        safeCopyChars(credentials.shipment_code, sizeof(credentials.shipment_code), DEFAULT_SHIPMENT_CODE);
-      }
+      credentials.shipment_code[0] = '\0';  // Pha 1 chỉ kích hoạt, chưa gắn đơn ship
       ok = true;
     }
   } else {
@@ -366,6 +378,73 @@ static bool callAPIVerify(const String& publicKeyPem) {
 
   http.end();
   return ok;
+}
+
+// Pha 2 — thiết bị tự gắn vào 1 đơn ship: POST /api/devices/bind (ký như telemetry).
+static bool callAPIBind(const String& shipmentCode) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[BIND] Chua co Wi-Fi.");
+    return false;
+  }
+  time_t now = time(nullptr);
+  if (now < 1700000000) {
+    Serial.println("[BIND] Epoch chua hop le.");
+    return false;
+  }
+  uint32_t ts = (uint32_t)now;
+  String nonce = randomNonceHex();
+  String payload = "{\"shipment_code\":\"" + shipmentCode + "\"}";
+  String payloadHash = sha256Hex(payload);
+  String canonical = "POST\n/api/devices/bind\n" + device_id + "\n" + String(ts) + "\n" + nonce + "\n" + payloadHash;
+  String sig;
+  if (!signWithPrivateKeyBase64(canonical, credentials.private_key_raw, sig)) {
+    Serial.println("[BIND] Khong ky duoc.");
+    return false;
+  }
+
+  HTTPClient http;
+  beginHttp(http, SERVER_BIND_URL);
+  http.addHeader("Content-Type", "application/json");
+  http.addHeader("x-api-key", credentials.api_key);
+  http.addHeader("x-device-id", device_id);
+  http.addHeader("x-timestamp", String(ts));
+  http.addHeader("x-nonce", nonce);
+  http.addHeader("x-signature", sig);
+
+  int code = http.POST(payload);
+  bool ok = false;
+  if (code == 200) {
+    String resp = http.getString();
+    StaticJsonDocument<256> doc;
+    if (deserializeJson(doc, resp) == DeserializationError::Ok && doc["shipment_code"]) {
+      safeCopyChars(credentials.shipment_code, sizeof(credentials.shipment_code), (const char*)doc["shipment_code"]);
+      ok = true;
+      Serial.print("[BIND] Da gan don ship: ");
+      Serial.println(credentials.shipment_code);
+    }
+  } else {
+    Serial.print("[BIND] Loi HTTP: ");
+    Serial.println(code);
+  }
+  http.end();
+  return ok;
+}
+
+// Đổi/bỏ đơn ship hiện tại rồi lưu lại (thiết bị vẫn kích hoạt). Gọi từ WebPortal.
+bool rebindShipment(const String& shipmentCode) {
+  if (callAPIBind(shipmentCode)) {
+    saveCredentials();
+    return true;
+  }
+  return false;
+}
+
+// Xóa toàn bộ credentials trong NVS rồi khởi động lại -> vào lại luồng kích hoạt.
+void factoryResetAndReboot() {
+  preferences.clear();   // xóa namespace "iot-secure" đang mở
+  preferences.end();
+  delay(200);
+  ESP.restart();
 }
 
 static void initGpsIfEnabled() {
@@ -457,6 +536,10 @@ static bool sendTelemetryPayload(const SensorSnapshot& sensor) {
     Serial.println("[TELEMETRY] Bo qua vi mat ket noi Wi-Fi.");
     return false;
   }
+  if (strlen(credentials.shipment_code) == 0) {
+    Serial.println("[TELEMETRY] Chua gan don ship -> bo qua. Vao trang monitor de gan.");
+    return false;
+  }
 
   time_t now = time(nullptr);
   if (now < 1700000000) {
@@ -467,7 +550,7 @@ static bool sendTelemetryPayload(const SensorSnapshot& sensor) {
   String nonce = randomNonceHex();
 
   StaticJsonDocument<384> telemetry;
-  telemetry["shipment_code"] = strlen(credentials.shipment_code) > 0 ? credentials.shipment_code : DEFAULT_SHIPMENT_CODE;
+  telemetry["shipment_code"] = credentials.shipment_code;
   telemetry["temperature"] = sensor.temperature;
   telemetry["humidity"] = sensor.humidity;
   telemetry["rssi"] = sensor.ble_rssi;
@@ -489,7 +572,7 @@ static bool sendTelemetryPayload(const SensorSnapshot& sensor) {
   }
 
   HTTPClient http;
-  http.begin(SERVER_TELEMETRY_URL);
+  beginHttp(http, SERVER_TELEMETRY_URL);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("x-api-key", credentials.api_key);
   http.addHeader("x-device-id", device_id);
@@ -504,6 +587,12 @@ static bool sendTelemetryPayload(const SensorSnapshot& sensor) {
     g_last_telemetry_ms = millis();
   } else {
     g_telemetry_sent_fail++;
+    // 403 = backend tu choi do bo gan / don da ket thuc / sai don -> DUNG gui, bo binding.
+    if (code == 403) {
+      Serial.println("[TELEMETRY] Bi tu choi (403): don ket thuc hoac bi bo gan -> dung gui. Vao /monitor de gan don moi.");
+      credentials.shipment_code[0] = '\0';
+      saveCredentials();
+    }
   }
 
   if (code > 0) {
@@ -516,7 +605,7 @@ static bool sendTelemetryPayload(const SensorSnapshot& sensor) {
 }
 
 static bool runProvisioningFlow() {
-  Serial.println("[PROVISION] Bat dau portal setup Wi-Fi + verify code (tuy chon).");
+  Serial.println("[PROVISION] Portal: Wi-Fi + ma kich hoat (+ ma don ship tuy chon).");
   startWebPortal();
 
   while (!web_config_done) {
@@ -524,6 +613,9 @@ static bool runProvisioningFlow() {
     delay(2);
   }
   web_config_done = false;
+
+  // Nguoi dung co the nhap ma don ship o buoc kich hoat (tuy chon) -> luu tam truoc khi verify xoa.
+  String desiredShipment = String(credentials.shipment_code);
 
   if (!connectToWiFi(credentials.wifi_ssid, credentials.wifi_pass)) {
     Serial.println("[PROVISION] Khong ket noi duoc Wi-Fi sau khi nhap portal.");
@@ -536,9 +628,9 @@ static bool runProvisioningFlow() {
     return false;
   }
 
-  Serial.println("[PROVISION] Dang xu ly verify de nhan x-api-key...");
+  Serial.println("[PROVISION] Pha 1 - kich hoat thiet bi...");
   if (!callAPIVerify(pubKeyPem)) {
-    Serial.println("[PROVISION] Verify that bai. Kiem tra verify_code hoac backend.");
+    Serial.println("[PROVISION] Kich hoat that bai. Kiem tra ma kich hoat hoac backend.");
     return false;
   }
 
@@ -546,9 +638,19 @@ static bool runProvisioningFlow() {
   credentials.has_private_key = true;
   credentials.is_provisioned = true;
   g_is_provisioned = true;
-  saveCredentials();
 
-  Serial.println("[PROVISION] Thanh cong: da luu device_id, api_key, private_key vao NVS.");
+  // Pha 2 (tuy chon ngay luc nay) - gan don ship neu nguoi dung da nhap.
+  if (desiredShipment.length() > 0) {
+    Serial.println("[PROVISION] Pha 2 - gan don ship...");
+    if (!callAPIBind(desiredShipment)) {
+      Serial.println("[PROVISION] Gan don ship that bai. Co the gan sau tren trang monitor.");
+    }
+  } else {
+    Serial.println("[PROVISION] Chua gan don ship. Vao trang monitor de gan sau.");
+  }
+
+  saveCredentials();
+  Serial.println("[PROVISION] Hoan tat: da luu credentials vao NVS.");
   return true;
 }
 
@@ -572,13 +674,15 @@ void setup() {
 
   if (!hasProvisionedData) {
     if (!runProvisioningFlow()) {
-      Serial.println("[FATAL] Provisioning chua hoan tat. Dang doi reboot...");
-      while (1) {
-        delay(1000);
-      }
+      // Thất bại (Wi-Fi sai / mã kích hoạt sai / backend không tới được) -> khởi động lại
+      // để mở lại portal cho người dùng nhập lại, thay vì treo máy.
+      Serial.println("[PROVISION] That bai. Khoi dong lai sau 3s de nhap lai (kiem tra Wi-Fi/ma kich hoat).");
+      delay(3000);
+      ESP.restart();
     }
   } else {
     Serial.println("[BOOT] Da co thong tin provision trong NVS.");
+    startWebPortal();   // giu AP + trang monitor de quan ly / gan-doi don ship / reset
     if (!connectToWiFi(credentials.wifi_ssid, credentials.wifi_pass)) {
       Serial.println("[BOOT] Mat ket noi Wi-Fi, thiet bi se tiep tuc thu lai trong vong lap.");
     }

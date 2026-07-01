@@ -82,6 +82,10 @@ public class TelemetryIngestionService {
         String cleanSignature = required(signature, "X-Signature");
 
         TelemetryRequest payload = parseAndValidate(rawPayload);
+        if (device.getShipmentCode() == null) {
+            auditService.fail("DEVICE", deviceId, "TELEMETRY", "Device not bound to a shipment");
+            throw ApiException.forbidden("DEVICE_NOT_BOUND", "Device is not bound to any shipment; bind it first");
+        }
         if (!device.getShipmentCode().equals(payload.shipmentCode())) {
             auditService.fail("DEVICE", deviceId, "TELEMETRY", "Shipment mismatch");
             throw ApiException.forbidden("SHIPMENT_MISMATCH", "Device is not assigned to this shipment");

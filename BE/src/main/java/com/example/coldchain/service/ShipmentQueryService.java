@@ -13,6 +13,7 @@ import com.example.coldchain.util.HashUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,16 +57,38 @@ public class ShipmentQueryService {
     @Transactional(readOnly = true)
     public Page<TelemetryView> telemetry(String shipmentCode, Pageable pageable) {
         ensureShipmentExists(shipmentCode);
-        return telemetryRepository.findByShipmentCodeOrderByCreatedAtDesc(shipmentCode, pageable)
-                .map(t -> {
-                    List<String> issues = verifyIntegrity(t, true, new HashMap<>());
-                    return new TelemetryView(
-                            t.getId(), t.getDeviceId(), t.getShipmentCode(),
-                            t.getTemperature(), t.getHumidity(), t.getRssi(), t.getLat(), t.getLng(), t.getBattery(),
-                            t.getDeviceTimestamp(), t.getPayloadHash(), t.getRecordHash(), t.getCreatedAt(),
-                            !issues.isEmpty(), issues
-                    );
-                });
+        Page<TelemetryRecord> page = telemetryRepository.findByShipmentCodeOrderByCreatedAtDesc(shipmentCode, pageable);
+        List<TelemetryRecord> records = page.getContent();
+
+        Map<UUID, Boolean> chainOkById = computeChainLinkage(records);
+        Map<String, Device> deviceCache = new HashMap<>();
+
+        List<TelemetryView> views = new ArrayList<>(records.size());
+        for (TelemetryRecord t : records) {
+            List<String> issues = verifyIntegrity(t, chainOkById.getOrDefault(t.getId(), Boolean.TRUE), deviceCache);
+            views.add(new TelemetryView(
+                    t.getId(), t.getDeviceId(), t.getShipmentCode(),
+                    t.getTemperature(), t.getHumidity(), t.getRssi(), t.getLat(), t.getLng(), t.getBattery(),
+                    t.getDeviceTimestamp(), t.getPayloadHash(), t.getRecordHash(), t.getCreatedAt(),
+                    !issues.isEmpty(), issues
+            ));
+        }
+        return new PageImpl<>(views, pageable, page.getTotalElements());
+    }
+
+    @Transactional(readOnly = true)
+    public Page<AlertView> alerts(String shipmentCode, Pageable pageable) {
+        ensureShipmentExists(shipmentCode);
+        return alertRepository.findByShipmentCodeOrderByCreatedAtDesc(shipmentCode, pageable)
+                .map(a -> new AlertView(
+                        a.getId(),
+                        a.getShipmentCode(),
+                        a.getDeviceId(),
+                        a.getType().name(),
+                        a.getLevel().name(),
+                        a.getMessage(),
+                        a.getCreatedAt()
+                ));
     }
 
     /**
@@ -153,21 +176,6 @@ public class ShipmentQueryService {
         if (!p.hasNonNull(field)) return expected == null;
         if (expected == null) return false;
         return p.get(field).asInt() == expected;
-    }
-
-    @Transactional(readOnly = true)
-    public Page<AlertView> alerts(String shipmentCode, Pageable pageable) {
-        ensureShipmentExists(shipmentCode);
-        return alertRepository.findByShipmentCodeOrderByCreatedAtDesc(shipmentCode, pageable)
-                .map(a -> new AlertView(
-                        a.getId(),
-                        a.getShipmentCode(),
-                        a.getDeviceId(),
-                        a.getType().name(),
-                        a.getLevel().name(),
-                        a.getMessage(),
-                        a.getCreatedAt()
-                ));
     }
 
     private void ensureShipmentExists(String shipmentCode) {

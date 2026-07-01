@@ -11,7 +11,8 @@ public class Device {
     @Column(name = "device_id", nullable = false, length = 128)
     private String deviceId;
 
-    @Column(name = "shipment_code", nullable = false, length = 64)
+    // Null = thiết bị đã kích hoạt nhưng CHƯA gắn đơn ship nào.
+    @Column(name = "shipment_code", length = 64)
     private String shipmentCode;
 
     @Column(name = "api_key_hash", nullable = false, length = 128)
