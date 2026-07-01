@@ -166,7 +166,11 @@ public class ShipmentQueryService {
         if (!p.hasNonNull(field)) return expected == null;
         if (expected == null) return false;
         try {
-            return new BigDecimal(p.get(field).asText()).compareTo(expected) == 0;
+            // Cột DB có scale cố định (vd numeric(8,2)) nên giá trị lưu = làm tròn của payload.
+            // Phải làm tròn payload về đúng scale cột rồi mới so, tránh false positive khi
+            // thiết bị gửi nhiều chữ số thập phân hơn cột chứa.
+            BigDecimal payloadVal = new BigDecimal(p.get(field).asText());
+            return payloadVal.setScale(expected.scale(), java.math.RoundingMode.HALF_UP).compareTo(expected) == 0;
         } catch (NumberFormatException e) {
             return false;
         }
