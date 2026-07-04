@@ -1369,12 +1369,19 @@
   /* ============================================================
    *  Router
    * ============================================================ */
+  // Trang bản đồ 3D tách riêng trong js/map3d.js (tải MapLibre + Three.js lười từ CDN).
+  function viewMap3D() {
+    if (window.Map3D) window.Map3D.view(view, setHeader);
+    else { setHeader("Bản đồ 3D", ""); view.innerHTML = ""; view.appendChild(h("div", { class: "empty" }, "Thiếu js/map3d.js")); }
+  }
+
   const routes = {
     overview: viewOverview,
     shipments: viewShipments,
     codes: viewCodes,
     devices: viewDevices,
     monitor: viewMonitor,
+    map3d: viewMap3D,
     integrity: viewIntegrity,
   };
 
@@ -1387,6 +1394,7 @@
 
   function navTo() {
     clearInterval(monitorTimer); monitorTimer = null;
+    if (window.Map3D) window.Map3D.destroy(); // dừng animation/map khi rời trang 3D
     const route = currentRoute();
     document.querySelectorAll(".nav-item").forEach((a) => a.classList.toggle("active", a.dataset.route === route));
     routes[route]();

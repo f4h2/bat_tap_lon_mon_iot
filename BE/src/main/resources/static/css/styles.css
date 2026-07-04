@@ -366,3 +366,22 @@ canvas { width: 100%; height: 100%; display: block; }
 .legend .l-warn-risk::before { color: var(--warn); }
 .legend .l-ok-risk::before { color: var(--ok); }
 
+
+/* ---- Trang Bản đồ 3D ---- */
+.m3d-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .m3d-wrap { grid-template-columns: 1fr; } }
+.m3d-map-panel { padding: 0; overflow: hidden; position: relative; }
+.m3d-map { width: 100%; height: 620px; }
+.m3d-side { display: flex; flex-direction: column; gap: 16px; }
+.m3d-controls .toolbar { flex-wrap: wrap; margin-bottom: 12px; }
+.m3d-speed { padding: 7px 10px; border-radius: 8px; border: 1px solid #cfe0ec; background: #fff; font: inherit; }
+.m3d-prog { height: 10px; border-radius: 999px; background: #e3edf5; overflow: hidden; margin-bottom: 14px; }
+.m3d-prog-fill { height: 100%; width: 0; border-radius: 999px; background: linear-gradient(90deg, #1d6f8d, #1f9d55); transition: width .25s linear; }
+.m3d-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.m3d-stats .metric { padding: 10px 12px; }
+.m3d-active { border-color: #1d6f8d !important; color: #1d6f8d !important; background: #e8f3f8 !important; }
+.m3d-banner { position: absolute; z-index: 5; top: 12px; left: 12px; right: 60px; background: #c53030; color: #fff; padding: 10px 14px; border-radius: 10px; font-weight: 600; font-size: 13px; box-shadow: 0 6px 18px rgba(197,48,48,.35); }
+.m3d-log { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.m3d-log-item { display: flex; gap: 8px; font-size: 12.5px; color: #355a79; padding: 6px 8px; background: #f4f8fb; border-radius: 8px; }
+.m3d-log-err { background: #fdecec; color: #b03030; }
+.m3d-log-time { color: #7b93a8; font-variant-numeric: tabular-nums; white-space: nowrap; }
