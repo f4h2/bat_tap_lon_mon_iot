@@ -1,18 +1,13 @@
-/* Trang "Bản đồ 3D": xe tải 3D chạy theo lộ trình OSRM thật (Trại Mát -> Nhà máy AgriSense)
- * trên nền tile OpenStreetMap nghiêng 3D (MapLibre GL + Three.js, tải lười từ CDN).
- * Mất mạng OSRM -> tự chuyển sang lộ trình mô phỏng nội suy qua các waypoint dựng sẵn. */
+/* Trang "Lộ trình di chuyển": xe tải 3D chạy lại lộ trình GPS của một đơn ship
+ * (mở từ nút "Xem lộ trình di chuyển" ở màn Giám sát) trên nền tile OpenStreetMap
+ * nghiêng 3D (MapLibre GL + Three.js, tải lười từ CDN). Lộ trình bám đường thật
+ * lấy từ OSRM qua các điểm GPS telemetry; mất mạng OSRM -> nội suy mượt qua chính
+ * các điểm GPS đó (lộ trình mô phỏng). */
 (function (global) {
   "use strict";
 
-  /* ---- Cấu hình tuyến & mô phỏng ---- */
-  const ORIGIN = { name: "Trại Mát (Đà Lạt)", lng: 108.5060, lat: 11.9200 };
-  const DEST = { name: "Nhà máy AgriSense", lng: 108.4419, lat: 11.9404 };
-  // Waypoint dự phòng bám hướng QL20 / Trần Hưng Đạo khi không gọi được OSRM.
-  const FALLBACK_WAYPOINTS = [
-    [108.5060, 11.9200], [108.4980, 11.9235], [108.4890, 11.9218],
-    [108.4790, 11.9262], [108.4700, 11.9310], [108.4610, 11.9330],
-    [108.4520, 11.9370], [108.4419, 11.9404],
-  ];
+  /* ---- Cấu hình mô phỏng ---- */
+  const SHIP_KEY = "m3d_shipment"; // sessionStorage: mã chuyến hàng đang xem
   const TRUCK_SPEED_KMH = 40;          // tốc độ giả định của xe để tính ETA
   const SIM_DURATION_S = 90;           // thời gian chạy hết tuyến ở tốc độ 1x (giây thực)
   const SENSOR_INTERVAL_MS = 2000;     // chu kỳ cập nhật cảm biến khoang lạnh
@@ -87,6 +82,17 @@
     for (let i = 1; i < coords.length; i++) cum.push(cum[i - 1] + haversineM(coords[i - 1], coords[i]));
     return { coords, cum, totalM: cum[cum.length - 1] };
   }
+  // Đoạn tuyến từ đầu đến quãng đường đã đi (để tô màu phần đường đã qua).
+  function coordsUpTo(track, distM) {
+    const { coords, cum } = track;
+    const d = Math.min(Math.max(distM, 0), track.totalM);
+    const out = [coords[0]];
+    for (let i = 1; i < coords.length && cum[i] <= d; i++) out.push(coords[i]);
+    const p = pointAt(track, d);
+    out.push([p.lng, p.lat]);
+    return out;
+  }
+
   function pointAt(track, distM) {
     const { coords, cum } = track;
     const d = Math.min(Math.max(distM, 0), track.totalM);
@@ -99,17 +105,27 @@
     return { lng: a[0] + (b[0] - a[0]) * t, lat: a[1] + (b[1] - a[1]) * t, bearing: bearingDeg(a, b) };
   }
 
-  /* ---- Lấy lộ trình: OSRM thật, lỗi -> mô phỏng ---- */
-  async function fetchRoute() {
+  /* ---- Lấy lộ trình bám đường thật từ OSRM qua các điểm GPS của chuyến hàng;
+   *      lỗi/mất mạng -> nội suy mượt qua chính các điểm GPS (mô phỏng). ---- */
+  async function fetchRoute(gpsCoords) {
     try {
-      const url = `https://router.project-osrm.org/route/v1/driving/${ORIGIN.lng},${ORIGIN.lat};${DEST.lng},${DEST.lat}?overview=full&geometries=geojson`;
+      const MAX = 25; // OSRM demo giới hạn waypoint -> lấy mẫu đều, giữ điểm đầu/cuối
+      let pts = gpsCoords;
+      if (gpsCoords.length > MAX) {
+        pts = [];
+        const step = (gpsCoords.length - 1) / (MAX - 1);
+        for (let i = 0; i < MAX; i++) pts.push(gpsCoords[Math.round(i * step)]);
+      }
+      const coordStr = pts.map((c) => `${c[0]},${c[1]}`).join(";");
+      const url = `https://router.project-osrm.org/route/v1/driving/${coordStr}?overview=full&geometries=geojson`;
       const res = await fetch(url, { signal: AbortSignal.timeout ? AbortSignal.timeout(8000) : undefined });
       if (!res.ok) throw new Error("OSRM " + res.status);
       const data = await res.json();
       if (!data.routes || !data.routes.length) throw new Error("OSRM không trả về tuyến");
       return { coords: data.routes[0].geometry.coordinates, source: "osrm" };
     } catch (_) {
-      return { coords: smoothWaypoints(FALLBACK_WAYPOINTS, 24), source: "fallback" };
+      const coords = gpsCoords.length > 2 ? smoothWaypoints(gpsCoords, 8) : gpsCoords.slice();
+      return { coords, source: "fallback" };
     }
   }
 
@@ -158,7 +174,10 @@
       },
       render(gl, matrix) {
         const merc = maplibregl.MercatorCoordinate.fromLngLat([state.lng, state.lat], 0);
-        const s = merc.meterInMercatorCoordinateUnits() * 2.2; // phóng to cho dễ nhìn
+        // Phóng to xe theo mức zoom: zoom càng xa hệ số càng lớn để xe luôn dễ nhìn.
+        const zoom = state.map ? state.map.getZoom() : 16;
+        const boost = Math.max(4, 4 * Math.pow(2, 15.5 - zoom));
+        const s = merc.meterInMercatorCoordinateUnits() * boost;
         const m = new THREE.Matrix4().fromArray(matrix);
         const l = new THREE.Matrix4()
           .makeTranslation(merc.x, merc.y, merc.z)
@@ -200,12 +219,44 @@
 
   async function view(viewHost, setHeader) {
     destroySession();
-    setHeader("Bản đồ 3D", `Mô phỏng xe lạnh chạy ${ORIGIN.name} → ${DEST.name} trên bản đồ OpenStreetMap 3D.`);
     viewHost.innerHTML = "";
+
+    // Trang này gắn với 1 đơn ship: mã được màn Giám sát ghi vào sessionStorage
+    // trước khi chuyển trang (nút "Xem lộ trình di chuyển").
+    const shipCode = sessionStorage.getItem(SHIP_KEY);
+    if (!shipCode) {
+      setHeader("Lộ trình di chuyển", "Xem lại hành trình 3D của một chuyến hàng.");
+      viewHost.appendChild(el("div", { class: "empty panel" }, [
+        "Chưa chọn chuyến hàng. Vào màn ",
+        el("a", { href: "#/monitor" }, "Giám sát"),
+        ", chọn chuyến hàng rồi bấm \"Xem lộ trình di chuyển\" trong phần Lộ trình GPS.",
+      ]));
+      return;
+    }
+    setHeader("Lộ trình di chuyển", `Mô phỏng 3D hành trình của chuyến hàng ${shipCode} theo dữ liệu GPS telemetry.`);
+
+    // Lấy telemetry của chuyến hàng -> chuỗi điểm GPS theo thời gian tăng dần.
+    let teleAsc = [];
+    try {
+      const tele = await Api.telemetry(shipCode); // DESC theo thời gian
+      teleAsc = tele.slice().reverse().filter((t) => t.lat != null && t.lng != null);
+    } catch (err) {
+      viewHost.appendChild(el("div", { class: "empty panel" },
+        "Không tải được telemetry của chuyến hàng " + shipCode + ". Kiểm tra backend rồi bấm Làm mới."));
+      return;
+    }
+    const gpsCoords = teleAsc.map((t) => [Number(t.lng), Number(t.lat)]);
+    if (gpsCoords.length < 2) {
+      viewHost.appendChild(el("div", { class: "empty panel" },
+        `Chuyến hàng ${shipCode} chưa đủ dữ liệu GPS (cần ít nhất 2 điểm) để dựng lộ trình di chuyển.`));
+      return;
+    }
+    const origin = { name: "Điểm xuất phát", lng: gpsCoords[0][0], lat: gpsCoords[0][1] };
+    const dest = { name: "Vị trí mới nhất", lng: gpsCoords[gpsCoords.length - 1][0], lat: gpsCoords[gpsCoords.length - 1][1] };
 
     const s = {
       alive: true, playing: false, distM: 0, speedMul: 1,
-      lng: ORIGIN.lng, lat: ORIGIN.lat, bearing: 90,
+      lng: origin.lng, lat: origin.lat, bearing: 90,
       follow: true, temp: TEMP_BASE_C, hum: HUM_BASE_PCT,
       doorOpenUntil: 0, alertActive: false, lastTs: null,
       milestones: new Set(), arrived: false,
@@ -259,7 +310,7 @@
     /* -- tải thư viện + lộ trình song song -- */
     let libs, routeRes;
     try {
-      [libs, routeRes] = await Promise.all([loadLibs(), fetchRoute()]);
+      [libs, routeRes] = await Promise.all([loadLibs(), fetchRoute(gpsCoords)]);
     } catch (err) {
       mapEl.appendChild(el("div", { class: "map-fallback" },
         "Không tải được thư viện bản đồ (cần internet lần đầu). Kiểm tra kết nối rồi bấm Làm mới."));
@@ -272,8 +323,8 @@
       ? "Lộ trình OSRM (đường thật)" : "Lộ trình mô phỏng (mất mạng OSRM)";
     routeTag.className = "badge " + (routeRes.source === "osrm" ? "badge-intact" : "badge-tamper");
     addLog(routeRes.source === "osrm"
-      ? `Đã lấy lộ trình bám đường thật từ OSRM (${(track.totalM / 1000).toFixed(1)} km).`
-      : "Không gọi được OSRM — dùng lộ trình mô phỏng dựng sẵn.");
+      ? `Chuyến ${shipCode}: lộ trình bám đường thật từ OSRM qua ${gpsCoords.length} điểm GPS (${(track.totalM / 1000).toFixed(1)} km).`
+      : `Chuyến ${shipCode}: không gọi được OSRM — nội suy mô phỏng qua ${gpsCoords.length} điểm GPS.`);
 
     /* -- khởi tạo bản đồ -- */
     const map = new maplibregl.Map({
@@ -289,7 +340,7 @@
         },
         layers: [{ id: "osm", type: "raster", source: "osm" }],
       },
-      center: [ORIGIN.lng, ORIGIN.lat],
+      center: [origin.lng, origin.lat],
       zoom: 14.5, pitch: FOLLOW_PITCH, bearing: 0, antialias: true,
     });
     s.mapObj = map;
@@ -311,11 +362,21 @@
         id: "route-line", type: "line", source: "route",
         paint: { "line-color": "#1d6f8d", "line-width": 5 },
       });
+      // Phần đường đã đi qua: tô màu khác (xanh lá) đè lên tuyến gốc, cập nhật theo xe.
+      map.addSource("route-done", {
+        type: "geojson",
+        data: { type: "Feature", geometry: { type: "LineString", coordinates: [track.coords[0]] } },
+      });
+      map.addLayer({
+        id: "route-done-line", type: "line", source: "route-done",
+        paint: { "line-color": "#1f9d55", "line-width": 5 },
+      });
+      s.doneSource = map.getSource("route-done");
       map.addLayer(createTruckLayer(maplibregl, THREE, s));
-      new maplibregl.Marker({ color: "#1f9d55" }).setLngLat([ORIGIN.lng, ORIGIN.lat])
-        .setPopup(new maplibregl.Popup().setText(ORIGIN.name)).addTo(map);
-      new maplibregl.Marker({ color: "#e65f2b" }).setLngLat([DEST.lng, DEST.lat])
-        .setPopup(new maplibregl.Popup().setText(DEST.name)).addTo(map);
+      new maplibregl.Marker({ color: "#1f9d55" }).setLngLat([origin.lng, origin.lat])
+        .setPopup(new maplibregl.Popup().setText(origin.name)).addTo(map);
+      new maplibregl.Marker({ color: "#e65f2b" }).setLngLat([dest.lng, dest.lat])
+        .setPopup(new maplibregl.Popup().setText(dest.name)).addTo(map);
       const b = track.coords.reduce(
         (acc, c) => acc.extend(c),
         new maplibregl.LngLatBounds(track.coords[0], track.coords[0]));
@@ -345,7 +406,7 @@
       setPlaying(false);
       setFollow(true);
       applyPosition();
-      addLog("Đặt lại hành trình về điểm xuất phát " + ORIGIN.name + ".");
+      addLog("Đặt lại hành trình về điểm xuất phát.");
     });
     btnFollow.addEventListener("click", () => setFollow(!s.follow));
     selSpeed.addEventListener("change", () => { s.speedMul = Number(selSpeed.value) || 1; });
@@ -355,6 +416,9 @@
     function applyPosition() {
       const p = pointAt(track, s.distM);
       s.lng = p.lng; s.lat = p.lat;
+      if (s.doneSource) {
+        s.doneSource.setData({ type: "Feature", geometry: { type: "LineString", coordinates: coordsUpTo(track, s.distM) } });
+      }
       // làm mượt hướng xe để không giật khi qua khúc cua
       let diff = ((p.bearing - s.bearing + 540) % 360) - 180;
       s.bearing += diff * 0.25;
@@ -391,25 +455,34 @@
         s.distM = track.totalM;
         s.arrived = true;
         setPlaying(false);
-        addLog("🏁 Xe đã đến " + DEST.name + ". Hành trình hoàn tất.");
+        addLog("🏁 Xe đã đến vị trí mới nhất của chuyến hàng. Mô phỏng hoàn tất.");
       }
       applyPosition();
     }
     s.raf = requestAnimationFrame(frame);
     applyPosition();
 
-    /* -- cảm biến khoang lạnh (mô phỏng realtime) -- */
+    /* -- cảm biến khoang lạnh: phát lại telemetry thật của chuyến theo tiến độ xe;
+     *    chuyến không có số liệu nhiệt/ẩm -> mô phỏng để demo. -- */
+    const hasRealTemp = teleAsc.some((t) => t.temperature != null);
     function sensorTick() {
       if (!s.alive) return;
-      const now = Date.now();
-      // Thỉnh thoảng "mở cửa khoang" khi đang chạy -> nhiệt tăng vượt ngưỡng để demo cảnh báo.
-      if (s.playing && s.doorOpenUntil < now && Math.random() < 0.06) {
-        s.doorOpenUntil = now + 10000;
-        addLog("Cửa khoang lạnh mở — nhiệt độ bắt đầu tăng.");
+      if (hasRealTemp) {
+        const frac = track.totalM ? s.distM / track.totalM : 0;
+        const rec = teleAsc[Math.min(teleAsc.length - 1, Math.round(frac * (teleAsc.length - 1)))];
+        if (rec.temperature != null) s.temp = Number(rec.temperature);
+        if (rec.humidity != null) s.hum = Number(rec.humidity);
+      } else {
+        const now = Date.now();
+        // Thỉnh thoảng "mở cửa khoang" khi đang chạy -> nhiệt vượt ngưỡng để demo cảnh báo.
+        if (s.playing && s.doorOpenUntil < now && Math.random() < 0.06) {
+          s.doorOpenUntil = now + 10000;
+          addLog("Cửa khoang lạnh mở — nhiệt độ bắt đầu tăng.");
+        }
+        const target = s.doorOpenUntil > now ? TEMP_ALERT_C + 1.8 : TEMP_BASE_C;
+        s.temp += (target - s.temp) * 0.3 + (Math.random() - 0.5) * 0.4;
+        s.hum += ((HUM_BASE_PCT - s.hum) * 0.2) + (Math.random() - 0.5) * 1.6;
       }
-      const target = s.doorOpenUntil > now ? TEMP_ALERT_C + 1.8 : TEMP_BASE_C;
-      s.temp += (target - s.temp) * 0.3 + (Math.random() - 0.5) * 0.4;
-      s.hum += ((HUM_BASE_PCT - s.hum) * 0.2) + (Math.random() - 0.5) * 1.6;
 
       const isAlert = s.temp > TEMP_ALERT_C;
       vTemp.textContent = s.temp.toFixed(1) + " °C";
@@ -430,7 +503,9 @@
     }
     s.sensorTimer = setInterval(sensorTick, SENSOR_INTERVAL_MS);
     sensorTick();
-    addLog("Kết nối cảm biến khoang lạnh (nhiệt độ / độ ẩm, chu kỳ 2 giây).");
+    addLog(hasRealTemp
+      ? "Phát lại số liệu cảm biến khoang lạnh (nhiệt độ / độ ẩm) từ telemetry của chuyến hàng."
+      : "Chuyến chưa có số liệu nhiệt/ẩm — dùng cảm biến mô phỏng (chu kỳ 2 giây).");
   }
 
   global.Map3D = { view, destroy: destroySession };

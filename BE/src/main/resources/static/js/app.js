@@ -1181,6 +1181,12 @@
     updateGpsMap();
     clear(r.dirBtnHost);
     const valid = coords.filter((c) => c.lat != null && c.lng != null);
+    if (valid.length >= 2) {
+      // Mở trang "Lộ trình di chuyển" (bản đồ 3D) gắn với chuyến hàng đang giám sát.
+      const btn3d = h("a", { href: "#/map3d", class: "btn btn-primary", style: "margin-top:10px; margin-right:8px" }, "🚚 Xem lộ trình di chuyển");
+      btn3d.addEventListener("click", () => sessionStorage.setItem("m3d_shipment", monitorState.code));
+      r.dirBtnHost.appendChild(btn3d);
+    }
     if (valid.length) r.dirBtnHost.appendChild(h("a", { href: googleDirUrl(valid), target: "_blank", rel: "noopener", class: "btn btn-ghost", style: "margin-top:10px" }, "🌍 Mở lộ trình trên Google Maps"));
 
     // alerts
@@ -1369,10 +1375,10 @@
   /* ============================================================
    *  Router
    * ============================================================ */
-  // Trang bản đồ 3D tách riêng trong js/map3d.js (tải MapLibre + Three.js lười từ CDN).
+  // Trang "Lộ trình di chuyển" (bản đồ 3D) tách riêng trong js/map3d.js.
   function viewMap3D() {
     if (window.Map3D) window.Map3D.view(view, setHeader);
-    else { setHeader("Bản đồ 3D", ""); view.innerHTML = ""; view.appendChild(h("div", { class: "empty" }, "Thiếu js/map3d.js")); }
+    else { setHeader("Lộ trình di chuyển", ""); view.innerHTML = ""; view.appendChild(h("div", { class: "empty" }, "Thiếu js/map3d.js")); }
   }
 
   const routes = {
