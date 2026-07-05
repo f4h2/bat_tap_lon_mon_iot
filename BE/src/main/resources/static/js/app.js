@@ -101,10 +101,10 @@
   }
 
   // Modal + QR (dùng thư viện qrcode.min.js vendored, chạy offline).
-  function showModal(title, contentNode) {
+  function showModal(title, contentNode, opts) {
     const overlay = h("div", { class: "modal-overlay" });
     const close = () => overlay.remove();
-    overlay.appendChild(h("div", { class: "modal" }, [
+    overlay.appendChild(h("div", { class: "modal" + (opts && opts.wide ? " modal-wide" : "") }, [
       h("div", { class: "modal-head" }, [h("div", { class: "panel-title" }, title), h("button", { class: "btn btn-ghost", onclick: close }, "✕")]),
       contentNode,
     ]));
@@ -155,49 +155,39 @@
     location.hash = "#/monitor";
   }
 
-  // Popup toàn màn hình xem lộ trình GPS của 1 đơn ship (không rời màn hiện tại).
-  let routeModalMap = null;
-  function showRouteModal(shipmentCode) {
-    const mapEl = h("div", { class: "modal-map" });
-    const info = h("div", { class: "page-sub", style: "margin:0 0 8px" }, "Đang tải lộ trình…");
+  // Popup toàn màn hình mô phỏng lộ trình di chuyển 3D (map3d) — hiển thị ngay trong màn Giám sát,
+  // không điều hướng sang route #/map3d.
+  function showMap3DModal(shipmentCode) {
+    if (!shipmentCode) return;
+    sessionStorage.setItem("m3d_shipment", shipmentCode);
+    const host = h("div", { class: "modal-map3d-host" });
     const overlay = h("div", { class: "modal-overlay" });
-    const close = () => { if (routeModalMap) { try { routeModalMap.remove(); } catch (_) {} routeModalMap = null; } overlay.remove(); };
+    const close = () => {
+      try { if (window.Map3D) window.Map3D.destroy(); } catch (_) {}
+      overlay.remove();
+    };
     overlay.appendChild(h("div", { class: "modal modal-full" }, [
-      h("div", { class: "modal-head" }, [h("div", { class: "panel-title" }, "🗺 Lộ trình GPS — " + shipmentCode), h("button", { class: "btn btn-ghost", onclick: close }, "✕ Đóng")]),
-      info, mapEl,
+      h("div", { class: "modal-head" }, [
+        h("div", { class: "panel-title" }, "🚚 Lộ trình di chuyển — " + shipmentCode),
+        h("button", { class: "btn btn-ghost", onclick: close }, "✕ Đóng"),
+      ]),
+      host,
     ]));
     overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
     document.body.appendChild(overlay);
 
-    Api.telemetry(shipmentCode).then((tele) => {
-      const asc = tele.slice().reverse();
-      const coords = asc.map((t) => ({ lat: t.lat != null ? Number(t.lat) : null, lng: t.lng != null ? Number(t.lng) : null })).filter((c) => c.lat != null && c.lng != null);
-      if (!coords.length) { info.textContent = "Chưa có dữ liệu GPS cho đơn này (thiết bị chưa gắn/bật GPS)."; return; }
-      info.textContent = coords.length + " điểm GPS · xanh = xuất phát, cam = vị trí hiện tại";
-      loadLeaflet().then((L) => {
-        const latlngs = coords.map((c) => [c.lat, c.lng]);
-        const map = L.map(mapEl).setView(latlngs[0], 13);
-        routeModalMap = map;
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
-        VN_ISLANDS.forEach((isl) => L.marker([isl.lat, isl.lng], { icon: L.divIcon({ className: "", html: "🇻🇳", iconSize: [22, 22] }) }).addTo(map).bindTooltip(isl.name, { permanent: true, direction: "top", className: "vn-island-label", offset: [0, -6] }));
-        const layer = L.layerGroup().addTo(map);
-        const draw = (line, dashed) => {
-          layer.clearLayers();
-          L.polyline(line, { color: "#1d6f8d", weight: dashed ? 3 : 5, opacity: dashed ? 0.5 : 0.9, dashArray: dashed ? "6 7" : null }).addTo(layer);
-          L.circleMarker(latlngs[0], { radius: 6, color: "#1f9d55", fillColor: "#1f9d55", fillOpacity: 1, weight: 2 }).bindTooltip("Xuất phát").addTo(layer);
-          L.circleMarker(latlngs[latlngs.length - 1], { radius: 8, color: "#fff", weight: 2, fillColor: "#e65f2b", fillOpacity: 1 }).bindTooltip("Vị trí hiện tại").addTo(layer);
-        };
-        draw(latlngs, true);
-        setTimeout(() => { try { map.invalidateSize(); map.fitBounds(L.latLngBounds(latlngs).pad(0.25)); } catch (_) {} }, 80);
-        fetchRoadRoute(coords).then((route) => draw(route, false)).catch(() => {});
-      }).catch(() => { info.textContent = "Không tải được bản đồ trực tuyến (cần internet)."; });
-    }).catch((e) => { info.textContent = e instanceof Api.ApiError ? e.message : "Lỗi tải lộ trình"; });
+    if (window.Map3D) {
+      // setHeader = no-op: đang ở trong modal nên không đổi tiêu đề trang.
+      setTimeout(() => { try { window.Map3D.view(host, function () {}); } catch (_) {} }, 30);
+    } else {
+      host.appendChild(h("div", { class: "empty" }, "Thiếu js/map3d.js"));
+    }
   }
 
   // Modal chi tiết 1 thiết bị: thông tin + đơn ship đã gắn (nhóm theo trạng thái, phân trang).
   async function showDeviceDetail(deviceId) {
     const body = h("div", { class: "loading" }, "Đang tải…");
-    showModal("Chi tiết thiết bị", body);
+    showModal("Chi tiết thiết bị", body, { wide: true });
     try {
       const d = await Api.deviceDetail(deviceId);
       clear(body); body.className = "";
@@ -243,7 +233,7 @@
             h("td", null, s.itemType || "—"),
             h("td", null, statusBadge(s.status)),
             h("td", null, String(s.telemetryCount)),
-            h("td", null, h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px", onclick: () => showRouteModal(s.shipmentCode) }, "🗺 Lộ trình")),
+            h("td", null, h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px", onclick: () => goToMonitor(s.shipmentCode) }, "🔎 Giám sát")),
           ]))),
         ])));
         if (pages > 1) {
@@ -741,7 +731,7 @@
     return h("div", { style: "overflow-x:auto" }, h("table", null, [
       h("thead", null, h("tr", null, ["Mã", "Loại hàng", "Nhiệt độ (°C)", "Độ ẩm (%)", "Thiết bị gắn", "Trạng thái", "Tạo lúc", "Hành động"].map((t) => h("th", null, t)))),
       h("tbody", null, list.map((s) => h("tr", null, [
-        h("td", null, h("span", { class: "mono link", title: "Xem lộ trình", onclick: () => showRouteModal(s.shipmentCode) }, s.shipmentCode)),
+        h("td", null, h("span", { class: "mono link", title: "Xem giám sát", onclick: () => goToMonitor(s.shipmentCode) }, s.shipmentCode)),
         h("td", null, s.itemType),
         h("td", null, `${num(s.minTemperature)} ÷ ${num(s.maxTemperature)}`),
         h("td", null, `${num(s.minHumidity)} ÷ ${num(s.maxHumidity)}`),
@@ -757,8 +747,8 @@
         h("td", null, [
           h("button", {
             class: "btn btn-blue", style: "font-size:11px;padding:2px 8px;margin-right:6px",
-            onclick: () => showRouteModal(s.shipmentCode),
-          }, "🗺 Lộ trình"),
+            onclick: () => goToMonitor(s.shipmentCode),
+          }, "🔎 Giám sát"),
           h("button", {
             class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px;margin-right:6px",
             onclick: () => showQrModal("QR đơn ship " + s.shipmentCode, s.shipmentCode, null, "http://192.168.4.1/monitor?ship=" + encodeURIComponent(s.shipmentCode)),
@@ -1380,8 +1370,7 @@
     const valid = coords.filter((c) => c.lat != null && c.lng != null);
     if (valid.length >= 2) {
       // Mở trang "Lộ trình di chuyển" (bản đồ 3D) gắn với chuyến hàng đang giám sát.
-      const btn3d = h("a", { href: "#/map3d", class: "btn btn-primary", style: "margin-top:10px; margin-right:8px" }, "🚚 Xem lộ trình di chuyển");
-      btn3d.addEventListener("click", () => sessionStorage.setItem("m3d_shipment", monitorState.code));
+      const btn3d = h("button", { class: "btn btn-primary", style: "margin-top:10px; margin-right:8px", onclick: () => showMap3DModal(monitorState.code) }, "🚚 Xem lộ trình di chuyển");
       r.dirBtnHost.appendChild(btn3d);
     }
     if (valid.length) r.dirBtnHost.appendChild(h("a", { href: googleDirUrl(valid), target: "_blank", rel: "noopener", class: "btn btn-ghost", style: "margin-top:10px" }, "🌍 Mở lộ trình trên Google Maps"));
