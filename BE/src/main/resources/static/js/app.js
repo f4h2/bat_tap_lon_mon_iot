@@ -47,6 +47,14 @@
     if (sec == null) return "—";
     return new Date(Number(sec) * 1000).toLocaleString("vi-VN", { hour12: false });
   }
+  // Nhãn thời gian ngắn cho trục X biểu đồ. withDate=true khi khoảng thời gian vượt 1 ngày.
+  function fmtClock(sec, withDate) {
+    if (sec == null) return "";
+    const d = new Date(Number(sec) * 1000);
+    const p = (n) => String(n).padStart(2, "0");
+    const hm = p(d.getHours()) + ":" + p(d.getMinutes());
+    return withDate ? p(d.getDate()) + "/" + p(d.getMonth() + 1) + " " + hm : hm + ":" + p(d.getSeconds());
+  }
   function relTime(iso) {
     if (!iso) return "chưa kết nối";
     const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -358,6 +366,21 @@
     for (let g = 0; g <= 4; g++) {
       const v = hMin + (g / 4) * (hMax - hMin);
       ctx.fillText(v.toFixed(0) + "%", W - padR + 6, yH(v));
+    }
+
+    // trục thời gian (X) — nhãn giờ tại một số mốc đều nhau
+    const tsVals = points.map((p) => p.ts).filter((v) => v != null);
+    if (tsVals.length) {
+      const withDate = (tsVals[tsVals.length - 1] - tsVals[0]) > 86400;
+      const nLabels = Math.min(6, points.length);
+      ctx.fillStyle = "#9aa9bb"; ctx.font = "10px Segoe UI"; ctx.textBaseline = "top";
+      for (let k = 0; k < nLabels; k++) {
+        const i = nLabels === 1 ? 0 : Math.round((k / (nLabels - 1)) * (points.length - 1));
+        const p = points[i];
+        if (!p || p.ts == null) continue;
+        ctx.textAlign = k === 0 ? "left" : (k === nLabels - 1 ? "right" : "center");
+        ctx.fillText(fmtClock(p.ts, withDate), x(i), padT + plotH + 6);
+      }
     }
 
     // dải ngưỡng nhiệt độ cho phép (trục trái, xanh lá)
@@ -1115,7 +1138,7 @@
     return asc.filter((t) => t.device_timestamp != null && t.device_timestamp >= latestTs - sec);
   }
   function chartSeries() {
-    return chartPointsAsc().map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
+    return chartPointsAsc().map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered, ts: t.device_timestamp != null ? Number(t.device_timestamp) : null }));
   }
 
   async function viewMonitor() {
