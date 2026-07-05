@@ -16,6 +16,21 @@
 #define USE_BATTERY_SENSOR  false
 #define USE_DHT_SENSOR      true
 
+// LCD I2C (mach chuyen doi giao tiep PCF8574) hien thi nhiet do / do am
+// CAN cai thu vien "LiquidCrystal I2C" (Frank de Brabander) trong Library Manager.
+#define USE_LCD           true
+#define LCD_I2C_ADDR      0x27   // hoac 0x3F -- dung I2C scanner neu khong hien
+#define LCD_COLS          16     // 16x2; doi thanh 20 neu dung LCD 20x4
+#define LCD_ROWS          2
+#define I2C_SDA_PIN       21     // SDA
+#define I2C_SCL_PIN       22     // SCL
+
+// LED bao trang thai: nhay khi gui telemetry OK, nhay cham khi mat Wi-Fi.
+// LED ngoai: GPIO -> dien tro 220-330 -> chan dai LED -> chan ngan -> GND.
+// Muon dung LED onboard tren board, doi LED_PIN thanh 2.
+#define USE_LED           true
+#define LED_PIN           4
+
 // MAC beacon BLE muc tieu de doc RSSI.
 static const char* BLE_TARGET_MAC = "";
 

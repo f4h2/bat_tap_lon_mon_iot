@@ -13,6 +13,8 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 #include <time.h>
 
 #include "mbedtls/md.h"
@@ -31,6 +33,7 @@ TinyGPSPlus gps;
 HardwareSerial gpsSerial(2);
 WebServer server(80);
 Preferences preferences;
+LiquidCrystal_I2C lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
 
 DeviceCredentials credentials;
 bool web_config_done = false;
@@ -46,6 +49,8 @@ unsigned long g_last_telemetry_ms = 0;
 int max_ble_rssi = -120;
 bool ble_initialized = false;
 unsigned long last_send_ms = 0;
+unsigned long led_next = 0;   // moc thoi gian ke tiep cho LED (tat pulse / doi trang thai nhay)
+bool led_state = false;
 
 // Khai bao truoc de tranh loi auto-prototype cua Arduino parser.
 static SensorSnapshot readSensors();
@@ -549,15 +554,31 @@ static bool sendTelemetryPayload(const SensorSnapshot& sensor) {
   uint32_t ts = (uint32_t)now;
   String nonce = randomNonceHex();
 
+  // Neu khong co cam bien that nao (tat ca deu gia lap) -> khong gui (tranh ban ghi rong/fake).
+  bool hasReal = (!sensor.sim_temp_hum) || (!sensor.sim_ble) || (!sensor.sim_gps) || (!sensor.sim_battery);
+  if (!hasReal) {
+    Serial.println("[TELEMETRY] Chua co cam bien that -> bo qua (khong gui du lieu fake).");
+    return false;
+  }
+
   StaticJsonDocument<384> telemetry;
   telemetry["shipment_code"] = credentials.shipment_code;
-  telemetry["temperature"] = sensor.temperature;
-  telemetry["humidity"] = sensor.humidity;
-  telemetry["rssi"] = sensor.ble_rssi;
-  telemetry["lat"] = sensor.gps_lat;
-  telemetry["lng"] = sensor.gps_lng;
-  int batteryPct = (int)constrain(((sensor.battery_v - 3.3f) / (4.2f - 3.3f)) * 100.0f, 0.0f, 100.0f);
-  telemetry["battery"] = batteryPct;
+  // Chi gui du lieu THAT; bo qua truong bi gia lap (khong co cam bien / doc loi).
+  if (!sensor.sim_temp_hum) {
+    telemetry["temperature"] = roundf(sensor.temperature * 10) / 10.0f;
+    telemetry["humidity"]    = roundf(sensor.humidity * 10) / 10.0f;
+  }
+  if (!sensor.sim_ble) {
+    telemetry["rssi"] = sensor.ble_rssi;
+  }
+  if (!sensor.sim_gps) {
+    telemetry["lat"] = sensor.gps_lat;
+    telemetry["lng"] = sensor.gps_lng;
+  }
+  if (!sensor.sim_battery) {
+    int batteryPct = (int)constrain(((sensor.battery_v - 3.3f) / (4.2f - 3.3f)) * 100.0f, 0.0f, 100.0f);
+    telemetry["battery"] = batteryPct;
+  }
 
   String telemetryPayload;
   serializeJson(telemetry, telemetryPayload);
@@ -660,6 +681,16 @@ void setup() {
 
   analogReadResolution(12);
 
+  if (USE_LED) { pinMode(LED_PIN, OUTPUT); digitalWrite(LED_PIN, LOW); }
+
+  if (USE_LCD) {
+    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+    lcd.init();
+    lcd.backlight();
+    lcd.setCursor(0, 0); lcd.print("ESP32 ColdChain");
+    lcd.setCursor(0, 1); lcd.print("Dang khoi dong..");
+  }
+
   device_id = getDeviceIdFromEfuse();
   Serial.println("\n================ ESP32 IoT Device ================");
   Serial.print("[INFO] Device ID: ");
@@ -697,17 +728,60 @@ void setup() {
   Serial.println("[BOOT] San sang gui telemetry.");
 }
 
+// Hien thi nhiet do / do am len LCD 16x2 (ky tu 0xDF = dau do tren HD44780).
+static void updateLcd(const SensorSnapshot& s) {
+  if (!USE_LCD) return;
+  char line[24];
+  if (s.sim_temp_hum) {
+    // Chua co DHT that -> khong hien so fake.
+    lcd.setCursor(0, 0); lcd.print("Nhiet:  --.- C  ");
+    lcd.setCursor(0, 1); lcd.print("Do am:  --.- %  ");
+    return;
+  }
+  snprintf(line, sizeof(line), "Nhiet:%5.1f%cC ", s.temperature, (char)0xDF);
+  lcd.setCursor(0, 0); lcd.print(line);
+  snprintf(line, sizeof(line), "Do am:%5.1f%%   ", s.humidity);
+  lcd.setCursor(0, 1); lcd.print(line);
+}
+
+// LED: nhay 1 cai (~120ms) khi gui telemetry thanh cong.
+static void ledPulse() {
+  if (!USE_LED) return;
+  digitalWrite(LED_PIN, HIGH);
+  led_state = true;
+  led_next = millis() + 120;
+}
+
+// LED: cap nhat moi vong loop. Mat Wi-Fi -> nhay cham; co Wi-Fi -> tat sau pulse.
+static void ledTask() {
+  if (!USE_LED) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    if (millis() >= led_next) {
+      led_state = !led_state;
+      digitalWrite(LED_PIN, led_state ? HIGH : LOW);
+      led_next = millis() + 300;
+    }
+    return;
+  }
+  if (led_state && millis() >= led_next) {
+    digitalWrite(LED_PIN, LOW);
+    led_state = false;
+  }
+}
+
 void loop() {
   if (WiFi.status() != WL_CONNECTED && strlen(credentials.wifi_ssid) > 0) {
     connectToWiFi(credentials.wifi_ssid, credentials.wifi_pass);
   }
 
   server.handleClient();
+  ledTask();
 
   if (millis() - last_send_ms >= TELEMETRY_INTERVAL_MS) {
     last_send_ms = millis();
     SensorSnapshot snap = readSensors();
-    sendTelemetryPayload(snap);
+    updateLcd(snap);                              // hien thi len LCD
+    if (sendTelemetryPayload(snap)) ledPulse();   // nhay LED khi gui OK
   }
 
   delay(20);
