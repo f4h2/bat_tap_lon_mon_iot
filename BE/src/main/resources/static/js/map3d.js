@@ -8,6 +8,11 @@
 
   /* ---- Cấu hình mô phỏng ---- */
   const SHIP_KEY = "m3d_shipment"; // sessionStorage: mã chuyến hàng đang xem
+  // 2 quần đảo của Việt Nam để gắn nhãn chủ quyền trên bản đồ.
+  const VN_ISLANDS = [
+    { name: "Quần đảo Hoàng Sa (Việt Nam)", lng: 112.0, lat: 16.5 },
+    { name: "Quần đảo Trường Sa (Việt Nam)", lng: 113.0, lat: 9.0 },
+  ];
   const TRUCK_SPEED_KMH = 40;          // tốc độ giả định của xe để tính ETA
   const SIM_DURATION_S = 90;           // thời gian chạy hết tuyến ở tốc độ 1x (giây thực)
   const SENSOR_INTERVAL_MS = 2000;     // chu kỳ cập nhật cảm biến khoang lạnh
@@ -377,6 +382,14 @@
         .setPopup(new maplibregl.Popup().setText(origin.name)).addTo(map);
       new maplibregl.Marker({ color: "#e65f2b" }).setLngLat([dest.lng, dest.lat])
         .setPopup(new maplibregl.Popup().setText(dest.name)).addTo(map);
+      // 2 quần đảo Hoàng Sa, Trường Sa của Việt Nam (nhãn chủ quyền như bản đồ 2D).
+      VN_ISLANDS.forEach((isl) => {
+        const wrap = el("div", { class: "m3d-island" }, [
+          el("div", { class: "m3d-island-flag" }, "🇻🇳"),
+          el("div", { class: "vn-island-label" }, isl.name),
+        ]);
+        new maplibregl.Marker({ element: wrap, anchor: "bottom" }).setLngLat([isl.lng, isl.lat]).addTo(map);
+      });
       const b = track.coords.reduce(
         (acc, c) => acc.extend(c),
         new maplibregl.LngLatBounds(track.coords[0], track.coords[0]));
