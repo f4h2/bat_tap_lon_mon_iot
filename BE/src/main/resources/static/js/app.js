@@ -995,8 +995,27 @@
   }
 
   // Dựng khung 1 lần / chuyến hàng để tab Bản đồ & lựa chọn tab không bị reset mỗi 5 giây.
+  // Thanh phân trang dùng chung cho danh sách Cảnh báo / bảng telemetry.
+  function pagerBar(page, totalItems, perPage, onChange) {
+    const totalPages = Math.max(1, Math.ceil(totalItems / perPage));
+    const cur = Math.min(page, totalPages - 1);
+    const mk = (label, target, disabled) => {
+      const b = h("button", { class: "btn btn-ghost pager-btn" }, label);
+      if (disabled) b.disabled = true;
+      else b.addEventListener("click", () => onChange(target));
+      return b;
+    };
+    return h("div", { class: "pager" }, [
+      mk("‹ Trước", cur - 1, cur <= 0),
+      h("span", { class: "pager-info" }, `Trang ${cur + 1}/${totalPages}`),
+      mk("Sau ›", cur + 1, cur >= totalPages - 1),
+    ]);
+  }
+
   function buildMonitorShell(body, ship) {
     clear(body);
+    monitorState.alertsPage = 0;
+    monitorState.telePage = 0;
     if (monitorState.gpsMap) { try { monitorState.gpsMap.remove(); } catch (_) {} }
     monitorState.gpsMap = null; monitorState.gpsRouteLayer = null; monitorState.gpsFitted = false;
     monitorState.roadRoute = null; monitorState.roadRouteKey = null; monitorState.roadRouteFetching = null;
@@ -1189,25 +1208,39 @@
     }
     if (valid.length) r.dirBtnHost.appendChild(h("a", { href: googleDirUrl(valid), target: "_blank", rel: "noopener", class: "btn btn-ghost", style: "margin-top:10px" }, "🌍 Mở lộ trình trên Google Maps"));
 
-    // alerts
-    clear(r.alertsHost);
-    r.alertsCount.textContent = alerts.length + " mục";
-    if (alerts.length) alerts.slice(0, 12).forEach((a) => r.alertsHost.appendChild(h("div", { class: "alert-item" }, [
-      h("div", { class: "alert-ico" }, a.level === "HIGH" ? "🔴" : a.level === "WARNING" ? "🟠" : "🔵"),
-      h("div", { class: "alert-body" }, [
-        h("div", { class: "alert-msg" }, a.message),
-        h("div", { class: "alert-meta" }, [a.type, " · ", a.deviceId || "—", " · ", fmtDateTime(a.createdAt)]),
-      ]),
-      levelBadge(a.level),
-    ])));
-    else r.alertsHost.appendChild(h("div", { class: "empty" }, "Không có cảnh báo. Dữ liệu trong ngưỡng an toàn ✔"));
+    // alerts (phân trang 10 mục / trang)
+    const ALERTS_PER_PAGE = 10;
+    const renderAlerts = () => {
+      clear(r.alertsHost);
+      r.alertsCount.textContent = alerts.length + " mục";
+      if (!alerts.length) {
+        r.alertsHost.appendChild(h("div", { class: "empty" }, "Không có cảnh báo. Dữ liệu trong ngưỡng an toàn ✔"));
+        return;
+      }
+      const page = Math.min(monitorState.alertsPage || 0, Math.ceil(alerts.length / ALERTS_PER_PAGE) - 1);
+      monitorState.alertsPage = page;
+      alerts.slice(page * ALERTS_PER_PAGE, (page + 1) * ALERTS_PER_PAGE).forEach((a) => r.alertsHost.appendChild(h("div", { class: "alert-item" }, [
+        h("div", { class: "alert-ico" }, a.level === "HIGH" ? "🔴" : a.level === "WARNING" ? "🟠" : "🔵"),
+        h("div", { class: "alert-body" }, [
+          h("div", { class: "alert-msg" }, a.message),
+          h("div", { class: "alert-meta" }, [a.type, " · ", a.deviceId || "—", " · ", fmtDateTime(a.createdAt)]),
+        ]),
+        levelBadge(a.level),
+      ])));
+      if (alerts.length > ALERTS_PER_PAGE) r.alertsHost.appendChild(pagerBar(page, alerts.length, ALERTS_PER_PAGE, (p) => { monitorState.alertsPage = p; renderAlerts(); }));
+    };
+    renderAlerts();
 
-    // bảng telemetry + hash chain
+    // bảng telemetry + hash chain (phân trang 20 bản ghi / trang)
+    const TELE_PER_PAGE = 20;
+    const renderTeleTable = () => {
     clear(r.tableHost);
     r.tableCount.textContent = tele.length + " bản ghi · hash chain chống sửa đổi";
+    const telePage = tele.length ? Math.min(monitorState.telePage || 0, Math.ceil(tele.length / TELE_PER_PAGE) - 1) : 0;
+    monitorState.telePage = telePage;
     if (tele.length) r.tableHost.appendChild(h("div", { style: "overflow-x:auto" }, h("table", null, [
       h("thead", null, h("tr", null, ["Thời gian", "Device", "Nhiệt độ", "Độ ẩm", "Pin", "RSSI", "GPS", "Record hash", "Toàn vẹn"].map((t) => h("th", null, t)))),
-      h("tbody", null, tele.slice(0, 30).map((t) => h("tr", { class: t.tampered ? "row-tampered" : "" }, [
+      h("tbody", null, tele.slice(telePage * TELE_PER_PAGE, (telePage + 1) * TELE_PER_PAGE).map((t) => h("tr", { class: t.tampered ? "row-tampered" : "" }, [
         h("td", null, fmtEpoch(t.device_timestamp)),
         h("td", null, h("span", { class: "mono" }, short(t.device_id, 10))),
         h("td", null, num(t.temperature) + "°C"),
@@ -1222,6 +1255,9 @@
       ]))),
     ])));
     else r.tableHost.appendChild(h("div", { class: "empty" }, "Chưa có telemetry. Thiết bị sẽ gửi dữ liệu sau khi provisioning."));
+    if (tele.length > TELE_PER_PAGE) r.tableHost.appendChild(pagerBar(telePage, tele.length, TELE_PER_PAGE, (p) => { monitorState.telePage = p; renderTeleTable(); }));
+    };
+    renderTeleTable();
   }
 
   // Khởi tạo bản đồ Leaflet 1 lần rồi tái sử dụng (cập nhật lộ trình qua updateGpsMap).
