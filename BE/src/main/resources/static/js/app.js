@@ -155,7 +155,46 @@
     location.hash = "#/monitor";
   }
 
-  // Modal chi tiết 1 thiết bị: thông tin + số đơn ship đã phục vụ.
+  // Popup toàn màn hình xem lộ trình GPS của 1 đơn ship (không rời màn hiện tại).
+  let routeModalMap = null;
+  function showRouteModal(shipmentCode) {
+    const mapEl = h("div", { class: "modal-map" });
+    const info = h("div", { class: "page-sub", style: "margin:0 0 8px" }, "Đang tải lộ trình…");
+    const overlay = h("div", { class: "modal-overlay" });
+    const close = () => { if (routeModalMap) { try { routeModalMap.remove(); } catch (_) {} routeModalMap = null; } overlay.remove(); };
+    overlay.appendChild(h("div", { class: "modal modal-full" }, [
+      h("div", { class: "modal-head" }, [h("div", { class: "panel-title" }, "🗺 Lộ trình GPS — " + shipmentCode), h("button", { class: "btn btn-ghost", onclick: close }, "✕ Đóng")]),
+      info, mapEl,
+    ]));
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) close(); });
+    document.body.appendChild(overlay);
+
+    Api.telemetry(shipmentCode).then((tele) => {
+      const asc = tele.slice().reverse();
+      const coords = asc.map((t) => ({ lat: t.lat != null ? Number(t.lat) : null, lng: t.lng != null ? Number(t.lng) : null })).filter((c) => c.lat != null && c.lng != null);
+      if (!coords.length) { info.textContent = "Chưa có dữ liệu GPS cho đơn này (thiết bị chưa gắn/bật GPS)."; return; }
+      info.textContent = coords.length + " điểm GPS · xanh = xuất phát, cam = vị trí hiện tại";
+      loadLeaflet().then((L) => {
+        const latlngs = coords.map((c) => [c.lat, c.lng]);
+        const map = L.map(mapEl).setView(latlngs[0], 13);
+        routeModalMap = map;
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+        VN_ISLANDS.forEach((isl) => L.marker([isl.lat, isl.lng], { icon: L.divIcon({ className: "", html: "🇻🇳", iconSize: [22, 22] }) }).addTo(map).bindTooltip(isl.name, { permanent: true, direction: "top", className: "vn-island-label", offset: [0, -6] }));
+        const layer = L.layerGroup().addTo(map);
+        const draw = (line, dashed) => {
+          layer.clearLayers();
+          L.polyline(line, { color: "#1d6f8d", weight: dashed ? 3 : 5, opacity: dashed ? 0.5 : 0.9, dashArray: dashed ? "6 7" : null }).addTo(layer);
+          L.circleMarker(latlngs[0], { radius: 6, color: "#1f9d55", fillColor: "#1f9d55", fillOpacity: 1, weight: 2 }).bindTooltip("Xuất phát").addTo(layer);
+          L.circleMarker(latlngs[latlngs.length - 1], { radius: 8, color: "#fff", weight: 2, fillColor: "#e65f2b", fillOpacity: 1 }).bindTooltip("Vị trí hiện tại").addTo(layer);
+        };
+        draw(latlngs, true);
+        setTimeout(() => { try { map.invalidateSize(); map.fitBounds(L.latLngBounds(latlngs).pad(0.25)); } catch (_) {} }, 80);
+        fetchRoadRoute(coords).then((route) => draw(route, false)).catch(() => {});
+      }).catch(() => { info.textContent = "Không tải được bản đồ trực tuyến (cần internet)."; });
+    }).catch((e) => { info.textContent = e instanceof Api.ApiError ? e.message : "Lỗi tải lộ trình"; });
+  }
+
+  // Modal chi tiết 1 thiết bị: thông tin + đơn ship đã gắn (nhóm theo trạng thái, phân trang).
   async function showDeviceDetail(deviceId) {
     const body = h("div", { class: "loading" }, "Đang tải…");
     showModal("Chi tiết thiết bị", body);
@@ -171,16 +210,60 @@
         row("Thuật toán ký", d.signatureAlgorithm || "—"),
         row("Kích hoạt", fmtDateTime(d.activatedAt || d.createdAt)),
         row("Lần cuối online", d.lastSeenAt ? fmtDateTime(d.lastSeenAt) : "—"),
-        row("Số bản ghi telemetry", String(d.telemetryCount)),
-        row("Số đơn ship đã phục vụ", String(served.length)),
+        row("Tổng telemetry", String(d.telemetryCount)),
+        row("Số đơn đã gắn", String(served.length)),
       ]));
-      body.appendChild(h("div", { class: "panel-title", style: "margin-top:14px;font-size:14px" }, "Đơn ship đã phục vụ"));
-      if (served.length) {
-        body.appendChild(h("div", { style: "display:flex;flex-wrap:wrap;gap:6px;margin-top:8px" },
-          served.map((sc) => h("button", { class: "btn btn-ghost", style: "font-size:12px;padding:4px 10px", onclick: () => goToMonitor(sc) }, "🔎 " + sc))));
-      } else {
-        body.appendChild(h("p", { class: "page-sub", style: "margin-top:8px" }, "Chưa gửi telemetry cho đơn ship nào."));
+
+      body.appendChild(h("div", { class: "panel-title", style: "margin-top:14px;font-size:14px" }, ["Đơn ship đã gắn ", h("small", null, served.length + " đơn")]));
+      if (!served.length) {
+        body.appendChild(h("p", { class: "page-sub" }, "Chưa gắn / gửi telemetry cho đơn ship nào."));
+        return;
       }
+
+      // Thống kê theo trạng thái
+      const counts = {};
+      served.forEach((s) => { counts[s.status] = (counts[s.status] || 0) + 1; });
+      body.appendChild(h("div", { style: "display:flex;flex-wrap:wrap;gap:10px;margin:6px 0 10px" },
+        Object.keys(counts).map((st) => h("span", { style: "display:inline-flex;align-items:center;gap:5px" }, [statusBadge(st), h("span", { class: "page-sub" }, "×" + counts[st])]))));
+
+      // Bộ lọc trạng thái + bảng phân trang
+      const listHost = h("div");
+      let filter = "ALL", page = 0; const pageSize = 6;
+      const renderList = () => {
+        clear(listHost);
+        const rows = served.filter((s) => filter === "ALL" || s.status === filter);
+        if (!rows.length) { listHost.appendChild(h("div", { class: "empty" }, "Không có đơn.")); return; }
+        const pages = Math.ceil(rows.length / pageSize);
+        if (page >= pages) page = pages - 1;
+        const slice = rows.slice(page * pageSize, page * pageSize + pageSize);
+        listHost.appendChild(h("div", { style: "overflow-x:auto" }, h("table", null, [
+          h("thead", null, h("tr", null, ["Đơn ship", "Loại hàng", "Trạng thái", "Bản ghi", ""].map((t) => h("th", null, t)))),
+          h("tbody", null, slice.map((s) => h("tr", { class: s.current ? "row-current" : "" }, [
+            h("td", null, [h("span", { class: "mono" }, s.shipmentCode), s.current ? h("span", { class: "badge badge-intact", style: "margin-left:6px;font-size:9px;padding:1px 6px" }, "hiện tại") : ""]),
+            h("td", null, s.itemType || "—"),
+            h("td", null, statusBadge(s.status)),
+            h("td", null, String(s.telemetryCount)),
+            h("td", null, h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px", onclick: () => showRouteModal(s.shipmentCode) }, "🗺 Lộ trình")),
+          ]))),
+        ])));
+        if (pages > 1) {
+          listHost.appendChild(h("div", { style: "display:flex;align-items:center;justify-content:center;gap:12px;margin-top:8px" }, [
+            h("button", { class: "btn btn-ghost", style: "padding:4px 10px", onclick: () => { if (page > 0) { page--; renderList(); } } }, "‹"),
+            h("span", { class: "page-sub" }, "Trang " + (page + 1) + "/" + pages),
+            h("button", { class: "btn btn-ghost", style: "padding:4px 10px", onclick: () => { if (page < pages - 1) { page++; renderList(); } } }, "›"),
+          ]));
+        }
+      };
+
+      const filters = ["ALL"].concat(Object.keys(counts));
+      const fbtns = filters.map((st) => {
+        const b = h("button", { class: "tab-btn" + (st === "ALL" ? " active" : "") }, st === "ALL" ? "Tất cả" : st);
+        b.addEventListener("click", () => { filter = st; page = 0; fbtns.forEach((x) => x.classList.remove("active")); b.classList.add("active"); renderList(); });
+        return b;
+      });
+      body.appendChild(h("div", { class: "tabs", style: "margin-bottom:10px" }, fbtns));
+      body.appendChild(listHost);
+      renderList();
     } catch (e) {
       clear(body); body.className = "";
       body.appendChild(h("p", { class: "page-sub" }, e instanceof Api.ApiError ? e.message : "Lỗi tải chi tiết thiết bị"));
@@ -614,12 +697,21 @@
     setHeader("Chuyến hàng", "Tạo lô hàng và thiết lập ngưỡng nhiệt độ / độ ẩm cho phép.");
     setLoading();
     try {
-      const [list, devices] = await Promise.all([Api.listShipments(), Api.listDevices()]);
+      const [list, devices, histMap] = await Promise.all([Api.listShipments(), Api.listDevices(), Api.shipmentDeviceMap()]);
       clear(view);
 
-      // map: shipmentCode -> [deviceId] (thiết bị đang gắn đơn đó)
+      // map: shipmentCode -> [{deviceId, current}] — gộp thiết bị ĐANG gắn + LỊCH SỬ (từ telemetry),
+      // để đơn đã bỏ gắn / hoàn thành vẫn thấy từng gắn thiết bị nào.
       const devMap = {};
-      devices.forEach((d) => { if (d.shipmentCode) (devMap[d.shipmentCode] = devMap[d.shipmentCode] || []).push(d.deviceId); });
+      const addDev = (sc, id, cur) => {
+        if (!sc || !id) return;
+        const arr = devMap[sc] = devMap[sc] || [];
+        let e = arr.find((x) => x.deviceId === id);
+        if (!e) { e = { deviceId: id, current: false }; arr.push(e); }
+        if (cur) e.current = true;
+      };
+      Object.keys(histMap || {}).forEach((sc) => (histMap[sc] || []).forEach((id) => addDev(sc, id, false)));
+      devices.forEach((d) => addDev(d.shipmentCode, d.deviceId, true));
 
       const tableHost = h("div");
       const count = h("small", null, list.length + " lô");
@@ -629,20 +721,15 @@
         clear(tableHost); tableHost.appendChild(shipmentsTable(rows, devMap));
       };
 
-      view.appendChild(h("div", { class: "grid-2" }, [
-        // bảng danh sách
-        h("div", { class: "panel" }, [
-          h("div", { class: "panel-head" }, [
-            h("div", { class: "panel-title" }, ["Danh sách chuyến hàng ", count]),
+      view.appendChild(h("div", { class: "panel" }, [
+        h("div", { class: "panel-head" }, [
+          h("div", { class: "panel-title" }, ["Danh sách chuyến hàng ", count]),
+          h("div", { style: "display:flex;gap:8px;align-items:center;flex-wrap:wrap" }, [
             searchBox("Tìm mã / loại hàng / trạng thái…", render),
+            h("button", { class: "btn btn-primary", onclick: () => showCreateShipmentModal(() => viewShipments()) }, "➕ Tạo chuyến hàng"),
           ]),
-          tableHost,
         ]),
-        // form tạo
-        h("div", { class: "panel" }, [
-          h("div", { class: "panel-title" }, "Tạo chuyến hàng mới"),
-          shipmentForm(),
-        ]),
+        tableHost,
       ]));
       render("");
     } catch (err) { showError(err); }
@@ -654,21 +741,24 @@
     return h("div", { style: "overflow-x:auto" }, h("table", null, [
       h("thead", null, h("tr", null, ["Mã", "Loại hàng", "Nhiệt độ (°C)", "Độ ẩm (%)", "Thiết bị gắn", "Trạng thái", "Tạo lúc", "Hành động"].map((t) => h("th", null, t)))),
       h("tbody", null, list.map((s) => h("tr", null, [
-        h("td", null, h("span", { class: "mono link", title: "Xem giám sát", onclick: () => goToMonitor(s.shipmentCode) }, s.shipmentCode)),
+        h("td", null, h("span", { class: "mono link", title: "Xem lộ trình", onclick: () => showRouteModal(s.shipmentCode) }, s.shipmentCode)),
         h("td", null, s.itemType),
         h("td", null, `${num(s.minTemperature)} ÷ ${num(s.maxTemperature)}`),
         h("td", null, `${num(s.minHumidity)} ÷ ${num(s.maxHumidity)}`),
         h("td", null, (devMap[s.shipmentCode] && devMap[s.shipmentCode].length)
-          ? h("div", { style: "display:flex;flex-direction:column;gap:2px" }, devMap[s.shipmentCode].map((did) =>
-              h("span", { class: "mono link", style: "font-size:12px", title: "Chi tiết thiết bị", onclick: () => showDeviceDetail(did) }, short(did, 16))))
+          ? h("div", { style: "display:flex;flex-direction:column;gap:3px" }, devMap[s.shipmentCode].map((e) =>
+              h("span", { class: "mono link", style: "font-size:12px", title: e.current ? "Đang gắn — xem chi tiết thiết bị" : "Đã gắn (lịch sử) — xem chi tiết", onclick: () => showDeviceDetail(e.deviceId) }, [
+                short(e.deviceId, 14),
+                e.current ? h("span", { class: "badge badge-intact", style: "margin-left:5px;font-size:9px;padding:1px 6px" }, "hiện tại") : "",
+              ])))
           : h("span", { class: "badge badge-muted" }, "Chưa có")),
         h("td", null, statusBadge(s.status)),
         h("td", null, fmtDateTime(s.createdAt)),
         h("td", null, [
           h("button", {
             class: "btn btn-blue", style: "font-size:11px;padding:2px 8px;margin-right:6px",
-            onclick: () => goToMonitor(s.shipmentCode),
-          }, "🔎 Giám sát"),
+            onclick: () => showRouteModal(s.shipmentCode),
+          }, "🗺 Lộ trình"),
           h("button", {
             class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px;margin-right:6px",
             onclick: () => showQrModal("QR đơn ship " + s.shipmentCode, s.shipmentCode, null, "http://192.168.4.1/monitor?ship=" + encodeURIComponent(s.shipmentCode)),
@@ -693,49 +783,87 @@
     ]));
   }
 
-  function shipmentForm() {
-    const f = (name, label, attrs) => h("div", { class: "field" }, [
-      h("label", null, label),
-      h("input", Object.assign({ name }, attrs)),
+  // Loại hàng cố định để chọn nhanh (kèm ngưỡng gợi ý °C / %).
+  const ITEM_CATEGORIES = [
+    { name: "Vaccine", t: [2, 8], h: [40, 70] },
+    { name: "Thực phẩm đông lạnh", t: [-22, -18], h: [40, 80] },
+    { name: "Hải sản tươi", t: [0, 4], h: [80, 95] },
+    { name: "Sữa & chế phẩm", t: [2, 6], h: [45, 70] },
+    { name: "Thịt tươi", t: [0, 4], h: [80, 90] },
+    { name: "Trái cây", t: [4, 12], h: [85, 95] },
+    { name: "Rau củ", t: [2, 8], h: [90, 98] },
+    { name: "Dược phẩm", t: [15, 25], h: [35, 60] },
+  ];
+  function genShipCode() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let r = "";
+    for (let i = 0; i < 4; i++) r += chars[Math.floor(Math.random() * chars.length)];
+    return "SHIP-" + r;
+  }
+
+  // Modal tạo chuyến hàng: mã tự sinh + chọn loại hàng theo category (tự điền ngưỡng gợi ý).
+  function showCreateShipmentModal(reload) {
+    const codeInput = h("input", { name: "shipmentCode", placeholder: "VD: SHIP-XXXX", required: "required", maxlength: "64" });
+    codeInput.value = genShipCode();
+    const genBtn = h("button", { type: "button", class: "btn btn-ghost", style: "white-space:nowrap" }, "🎲 Tự sinh");
+    genBtn.addEventListener("click", () => { codeInput.value = genShipCode(); });
+
+    const itemInput = h("input", { name: "itemType", placeholder: "Chọn nhanh hoặc tự nhập", required: "required", maxlength: "255" });
+    const tMin = h("input", { name: "minTemperature", type: "number", step: "0.1", value: "-22", required: "required" });
+    const tMax = h("input", { name: "maxTemperature", type: "number", step: "0.1", value: "-18", required: "required" });
+    const hMin = h("input", { name: "minHumidity", type: "number", step: "0.1", min: "0", max: "100", value: "40", required: "required" });
+    const hMax = h("input", { name: "maxHumidity", type: "number", step: "0.1", min: "0", max: "100", value: "80", required: "required" });
+    const catSelect = h("select", null, [
+      h("option", { value: "" }, "— chọn nhanh loại hàng —"),
+      ...ITEM_CATEGORIES.map((c, i) => h("option", { value: String(i) }, c.name)),
+      h("option", { value: "__other" }, "Khác (tự nhập)…"),
     ]);
-    const form = h("form", { class: "" }, [
+    catSelect.addEventListener("change", () => {
+      if (catSelect.value === "" || catSelect.value === "__other") { if (catSelect.value === "__other") { itemInput.value = ""; itemInput.focus(); } return; }
+      const c = ITEM_CATEGORIES[Number(catSelect.value)];
+      itemInput.value = c.name;
+      tMin.value = c.t[0]; tMax.value = c.t[1]; hMin.value = c.h[0]; hMax.value = c.h[1];  // điền ngưỡng gợi ý
+    });
+
+    const field = (label, node) => h("div", { class: "field" }, [h("label", null, label), node]);
+    const form = h("form", null, [
       h("div", { class: "form-grid" }, [
-        h("div", { class: "field full" }, [h("label", null, "Mã chuyến hàng *"), h("input", { name: "shipmentCode", placeholder: "VD: SHIP-456", required: "required", maxlength: "64" })]),
-        h("div", { class: "field full" }, [h("label", null, "Loại hàng *"), h("input", { name: "itemType", placeholder: "VD: Vaccine COVID-19", required: "required", maxlength: "255" })]),
-        f("minTemperature", "Nhiệt độ tối thiểu (°C)", { type: "number", step: "0.1", value: "-22", required: "required" }),
-        f("maxTemperature", "Nhiệt độ tối đa (°C)", { type: "number", step: "0.1", value: "-18", required: "required" }),
-        f("minHumidity", "Độ ẩm tối thiểu (%)", { type: "number", step: "0.1", min: "0", max: "100", value: "40", required: "required" }),
-        f("maxHumidity", "Độ ẩm tối đa (%)", { type: "number", step: "0.1", min: "0", max: "100", value: "80", required: "required" }),
+        h("div", { class: "field full" }, [h("label", null, "Mã chuyến hàng *"), h("div", { style: "display:flex;gap:8px" }, [codeInput, genBtn])]),
+        h("div", { class: "field full" }, [h("label", null, "Loại hàng *"), h("div", { style: "display:flex;flex-direction:column;gap:8px" }, [catSelect, itemInput])]),
+        field("Nhiệt độ tối thiểu (°C)", tMin),
+        field("Nhiệt độ tối đa (°C)", tMax),
+        field("Độ ẩm tối thiểu (%)", hMin),
+        field("Độ ẩm tối đa (%)", hMax),
       ]),
-      h("div", { class: "form-actions" }, [
-        h("button", { type: "submit", class: "btn btn-primary" }, "Tạo chuyến hàng"),
+      h("div", { style: "display:flex;justify-content:flex-end;gap:8px;margin-top:14px" }, [
+        h("button", { type: "submit", class: "btn btn-primary" }, "Tạo đơn"),
       ]),
     ]);
     form.addEventListener("submit", async (ev) => {
       ev.preventDefault();
       const btn = form.querySelector("button[type=submit]");
-      const data = Object.fromEntries(new FormData(form).entries());
       const payload = {
-        shipmentCode: data.shipmentCode.trim(),
-        itemType: data.itemType.trim(),
-        minTemperature: Number(data.minTemperature),
-        maxTemperature: Number(data.maxTemperature),
-        minHumidity: Number(data.minHumidity),
-        maxHumidity: Number(data.maxHumidity),
+        shipmentCode: codeInput.value.trim(),
+        itemType: itemInput.value.trim(),
+        minTemperature: Number(tMin.value), maxTemperature: Number(tMax.value),
+        minHumidity: Number(hMin.value), maxHumidity: Number(hMax.value),
       };
+      if (!payload.shipmentCode) { toast("Nhập hoặc tự sinh mã chuyến hàng.", "err"); return; }
+      if (!payload.itemType) { toast("Chọn hoặc nhập loại hàng.", "err"); return; }
       if (payload.minTemperature > payload.maxTemperature) { toast("Nhiệt độ tối thiểu phải ≤ tối đa.", "err"); return; }
       if (payload.minHumidity > payload.maxHumidity) { toast("Độ ẩm tối thiểu phải ≤ tối đa.", "err"); return; }
       btn.disabled = true;
       try {
         await Api.createShipment(payload);
         toast("Đã tạo chuyến hàng " + payload.shipmentCode, "ok");
-        viewShipments();
+        document.querySelectorAll(".modal-overlay").forEach((m) => m.remove());
+        reload();
       } catch (err) {
         toast(err instanceof Api.ApiError ? err.message : "Tạo thất bại", "err");
         btn.disabled = false;
       }
     });
-    return form;
+    showModal("Tạo chuyến hàng mới", form);
   }
 
   /* ---- Mã kích hoạt ---- */
@@ -868,10 +996,12 @@
       const tableHost = h("div");
       const count = h("small", null, list.length + " thiết bị");
       const reload = () => viewDevices();
+      // Tập đơn ship ĐANG được gắn (để loại khỏi danh sách gắn mới).
+      const boundSet = new Set(list.filter((d) => d.shipmentCode).map((d) => d.shipmentCode));
       const render = (q) => {
         const rows = list.filter((d) => matches([d.deviceId, d.shipmentCode, d.status, d.signatureAlgorithm], q));
         count.textContent = (q ? rows.length + "/" + list.length : list.length) + " thiết bị";
-        clear(tableHost); tableHost.appendChild(devicesTable(rows, shipments, reload));
+        clear(tableHost); tableHost.appendChild(devicesTable(rows, shipments, boundSet, reload));
       };
       view.appendChild(h("div", { class: "panel" }, [
         h("div", { class: "panel-head" }, [
@@ -884,7 +1014,7 @@
     } catch (err) { showError(err); }
   }
 
-  function devicesTable(list, shipments, reload) {
+  function devicesTable(list, shipments, boundSet, reload) {
     if (!list.length) return h("div", { class: "empty" }, "Chưa có thiết bị nào kích hoạt. (Nạp firmware ESP32 + nhập mã kích hoạt.)");
     return h("div", { style: "overflow-x:auto" }, h("table", null, [
       h("thead", null, h("tr", null, ["Device ID", "Đơn ship hiện tại", "Thuật toán ký", "Trạng thái", "Kích hoạt", "Lần cuối online", "Gắn đơn ship"].map((t) => h("th", null, t)))),
@@ -895,27 +1025,17 @@
         h("td", null, statusBadge(d.status)),
         h("td", null, fmtDateTime(d.activatedAt || d.createdAt)),
         h("td", null, [relTime(d.lastSeenAt), h("div", { class: "page-sub", style: "font-size:11px" }, d.lastSeenAt ? fmtDateTime(d.lastSeenAt) : "")]),
-        h("td", null, deviceBindControl(d, shipments, reload)),
+        h("td", null, deviceBindControl(d, shipments, boundSet, reload)),
       ]))),
     ]));
   }
 
-  function deviceBindControl(d, shipments, reload) {
-    const active = (shipments || []).filter((s) => s.status === "ACTIVE");
-    const select = h("select", { style: "font-size:12px;padding:4px 6px;max-width:150px" }, [
-      h("option", { value: "" }, "— chọn đơn —"),
-      ...active.map((s) => h("option", { value: s.shipmentCode, selected: s.shipmentCode === d.shipmentCode ? "selected" : null }, s.shipmentCode)),
-    ]);
-    const bindBtn = h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px;margin-left:4px" }, "Gắn");
-    bindBtn.addEventListener("click", async () => {
-      if (!select.value) { toast("Chọn đơn ship trước.", "err"); return; }
-      bindBtn.disabled = true;
-      try { await Api.bindDevice(d.deviceId, select.value); toast("Đã gắn " + d.deviceId + " → " + select.value, "ok"); reload(); }
-      catch (e) { toast(e instanceof Api.ApiError ? e.message : "Gắn thất bại", "err"); bindBtn.disabled = false; }
-    });
-    const kids = [select, bindBtn];
+  function deviceBindControl(d, shipments, boundSet, reload) {
+    const bindBtn = h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:3px 10px" }, d.shipmentCode ? "Đổi đơn" : "Gắn đơn ship");
+    bindBtn.addEventListener("click", () => showBindModal(d.deviceId, shipments, boundSet, reload));
+    const kids = [bindBtn];
     if (d.shipmentCode) {
-      const unbind = h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px;margin-left:4px" }, "Bỏ gắn");
+      const unbind = h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:3px 10px" }, "Bỏ gắn");
       unbind.addEventListener("click", async () => {
         unbind.disabled = true;
         try { await Api.bindDevice(d.deviceId, null); toast("Đã bỏ gắn " + d.deviceId, "ok"); reload(); }
@@ -923,7 +1043,65 @@
       });
       kids.push(unbind);
     }
-    return h("div", { style: "display:flex;align-items:center;flex-wrap:wrap;gap:3px" }, kids);
+    return h("div", { style: "display:flex;align-items:center;flex-wrap:wrap;gap:4px" }, kids);
+  }
+
+  // Modal chọn đơn ship (ACTIVE + chưa gắn thiết bị nào) để gắn — search + phân trang + chọn 1.
+  function showBindModal(deviceId, shipments, boundSet, reload) {
+    const available = (shipments || []).filter((s) => s.status === "ACTIVE" && !(boundSet && boundSet.has(s.shipmentCode)));
+    let selected = null, query = "", page = 0; const pageSize = 6;
+    const listHost = h("div");
+    const confirmBtn = h("button", { class: "btn btn-primary", disabled: "disabled" }, "Xác nhận gắn");
+    const render = () => {
+      clear(listHost);
+      const rows = available.filter((s) => matches([s.shipmentCode, s.itemType], query));
+      if (!rows.length) {
+        listHost.appendChild(h("div", { class: "empty" }, available.length ? "Không tìm thấy đơn phù hợp." : "Không có đơn ACTIVE nào đang trống (chưa gắn thiết bị)."));
+        return;
+      }
+      const pages = Math.ceil(rows.length / pageSize);
+      if (page >= pages) page = pages - 1;
+      const slice = rows.slice(page * pageSize, page * pageSize + pageSize);
+      listHost.appendChild(h("div", { style: "overflow-x:auto" }, h("table", null, [
+        h("thead", null, h("tr", null, ["", "Mã", "Loại hàng", "Nhiệt độ (°C)"].map((t) => h("th", null, t)))),
+        h("tbody", null, slice.map((s) => {
+          const radio = h("input", { type: "radio", name: "bindsel" });
+          if (selected === s.shipmentCode) radio.checked = true;
+          const tr = h("tr", { class: selected === s.shipmentCode ? "row-current" : "", style: "cursor:pointer" }, [
+            h("td", null, radio),
+            h("td", null, h("span", { class: "mono" }, s.shipmentCode)),
+            h("td", null, s.itemType),
+            h("td", null, `${num(s.minTemperature)} ÷ ${num(s.maxTemperature)}`),
+          ]);
+          tr.addEventListener("click", () => { selected = s.shipmentCode; confirmBtn.disabled = false; render(); });
+          return tr;
+        })),
+      ])));
+      if (pages > 1) {
+        listHost.appendChild(h("div", { style: "display:flex;align-items:center;justify-content:center;gap:12px;margin-top:8px" }, [
+          h("button", { class: "btn btn-ghost", style: "padding:4px 10px", onclick: () => { if (page > 0) { page--; render(); } } }, "‹"),
+          h("span", { class: "page-sub" }, "Trang " + (page + 1) + "/" + pages),
+          h("button", { class: "btn btn-ghost", style: "padding:4px 10px", onclick: () => { if (page < pages - 1) { page++; render(); } } }, "›"),
+        ]));
+      }
+    };
+    confirmBtn.addEventListener("click", async () => {
+      if (!selected) return;
+      confirmBtn.disabled = true;
+      try {
+        await Api.bindDevice(deviceId, selected);
+        toast("Đã gắn " + deviceId + " → " + selected, "ok");
+        document.querySelectorAll(".modal-overlay").forEach((m) => m.remove());
+        reload();
+      } catch (e) { toast(e instanceof Api.ApiError ? e.message : "Gắn thất bại", "err"); confirmBtn.disabled = false; }
+    });
+    showModal("Gắn đơn ship cho " + deviceId, h("div", null, [
+      h("p", { class: "page-sub", style: "margin:0 0 10px" }, "Chọn 1 đơn ship (ACTIVE, chưa gắn thiết bị nào)."),
+      searchBox("Tìm mã / tên chuyến hàng…", (q) => { query = q; page = 0; render(); }),
+      h("div", { style: "margin-top:12px" }, listHost),
+      h("div", { style: "display:flex;justify-content:flex-end;gap:8px;margin-top:14px" }, [confirmBtn]),
+    ]));
+    render();
   }
 
   /* ---- Giám sát (telemetry + GPS + cảnh báo) ---- */

@@ -13,7 +13,7 @@ public record DeviceDetailResponse(
         Instant createdAt,
         Instant activatedAt,
         Instant lastSeenAt,
-        List<String> shipmentsServed,   // các đơn ship thiết bị đã từng gửi telemetry
+        List<ServedShipment> shipmentsServed,   // các đơn ship thiết bị đã từng gắn/gửi dữ liệu
         long telemetryCount
 ) {
 }

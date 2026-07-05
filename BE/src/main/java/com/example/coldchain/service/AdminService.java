@@ -52,11 +52,35 @@ public class AdminService {
     public com.example.coldchain.dto.admin.DeviceDetailResponse getDeviceDetail(String deviceId) {
         Device d = deviceRepository.findById(deviceId)
                 .orElseThrow(() -> ApiException.badRequest("DEVICE_NOT_FOUND", "Device not found"));
-        java.util.List<String> served = telemetryRepository.findDistinctShipmentCodesByDeviceId(deviceId);
+        java.util.List<com.example.coldchain.dto.admin.ServedShipment> served = new java.util.ArrayList<>();
+        for (String sc : telemetryRepository.findDistinctShipmentCodesByDeviceId(deviceId)) {
+            Shipment sh = shipmentRepository.findById(sc).orElse(null);
+            long cnt = telemetryRepository.countByDeviceIdAndShipmentCode(deviceId, sc);
+            served.add(new com.example.coldchain.dto.admin.ServedShipment(sc,
+                    sh != null ? sh.getItemType() : "—",
+                    sh != null ? sh.getStatus().name() : "UNKNOWN",
+                    sc.equals(d.getShipmentCode()), cnt));
+        }
+        // Đơn đang gắn hiện tại nhưng chưa gửi telemetry -> vẫn đưa vào danh sách.
+        if (d.getShipmentCode() != null && served.stream().noneMatch(s -> s.shipmentCode().equals(d.getShipmentCode()))) {
+            Shipment sh = shipmentRepository.findById(d.getShipmentCode()).orElse(null);
+            served.add(0, new com.example.coldchain.dto.admin.ServedShipment(d.getShipmentCode(),
+                    sh != null ? sh.getItemType() : "—",
+                    sh != null ? sh.getStatus().name() : "UNKNOWN", true, 0));
+        }
         long telemetryCount = telemetryRepository.countByDeviceId(deviceId);
         return new com.example.coldchain.dto.admin.DeviceDetailResponse(
                 d.getDeviceId(), d.getShipmentCode(), d.getSignatureAlgorithm(), d.getStatus(),
                 d.getCreatedAt(), d.getActivatedAt(), d.getLastSeenAt(), served, telemetryCount);
+    }
+
+    // Map đơn ship -> danh sách device_id đã từng gửi dữ liệu (lịch sử gắn, kể cả đơn đã hoàn thành).
+    public java.util.Map<String, java.util.List<String>> getShipmentDeviceMap() {
+        java.util.Map<String, java.util.List<String>> map = new java.util.HashMap<>();
+        for (Object[] pair : telemetryRepository.findDistinctShipmentDevicePairs()) {
+            map.computeIfAbsent((String) pair[0], k -> new java.util.ArrayList<>()).add((String) pair[1]);
+        }
+        return map;
     }
 
     public Page<DeviceAdminResponse> getDevices(Pageable pageable) {

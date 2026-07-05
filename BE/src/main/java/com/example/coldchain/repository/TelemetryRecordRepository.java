@@ -25,4 +25,11 @@ public interface TelemetryRecordRepository extends JpaRepository<TelemetryRecord
     @org.springframework.data.jpa.repository.Query(
         "select t.recordHash from TelemetryRecord t where t.deviceId = :deviceId")
     List<String> findRecordHashesByDeviceId(@org.springframework.data.repository.query.Param("deviceId") String deviceId);
+
+    long countByDeviceIdAndShipmentCode(String deviceId, String shipmentCode);
+
+    // Các cặp (đơn ship, thiết bị) từng có dữ liệu — dựng lịch sử gắn thiết bị theo đơn.
+    @org.springframework.data.jpa.repository.Query(
+        "select distinct t.shipmentCode, t.deviceId from TelemetryRecord t")
+    List<Object[]> findDistinctShipmentDevicePairs();
 }

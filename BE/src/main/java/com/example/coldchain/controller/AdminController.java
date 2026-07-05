@@ -39,6 +39,12 @@ public class AdminController {
         return ResponseEntity.ok(adminService.getDeviceDetail(deviceId));
     }
 
+    // Map: đơn ship -> danh sách thiết bị đã từng gửi dữ liệu (lịch sử gắn).
+    @GetMapping("/shipment-device-map")
+    public ResponseEntity<java.util.Map<String, java.util.List<String>>> getShipmentDeviceMap() {
+        return ResponseEntity.ok(adminService.getShipmentDeviceMap());
+    }
+
     @GetMapping("/shipments")
     public ResponseEntity<Page<Shipment>> getShipments(@RequestParam(defaultValue = "0") int page,
                                                        @RequestParam(defaultValue = "100") int size) {

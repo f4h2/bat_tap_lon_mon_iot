@@ -175,6 +175,10 @@ tbody tr:hover { background: var(--panel-soft); }
 .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; gap: 12px; }
 .qr-box { display: inline-block; padding: 12px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
 .qr-box img, .qr-box canvas { display: block; }
+.modal-full { max-width: 94vw; width: 94vw; height: 88vh; display: flex; flex-direction: column; }
+.modal-map { flex: 1; min-height: 0; border-radius: 10px; overflow: hidden; }
+.row-current { background: #eef7ff !important; }
+.row-current td:first-child { box-shadow: inset 3px 0 0 var(--blue); }
 
 /* ---------- Search ---------- */
 .search {

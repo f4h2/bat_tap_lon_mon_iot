@@ -56,6 +56,7 @@
     // Devices
     listDevices: () => request("GET", "/api/admin/devices?size=200").then(unwrap),
     deviceDetail: (deviceId) => request("GET", "/api/admin/devices/" + encodeURIComponent(deviceId)),
+    shipmentDeviceMap: () => request("GET", "/api/admin/shipment-device-map"),
     // Admin gán/bỏ gắn đơn ship cho thiết bị (shipmentCode null = bỏ gắn)
     bindDevice: (deviceId, shipmentCode) => request("PUT", "/api/admin/devices/" + encodeURIComponent(deviceId) + "/shipment", { shipment_code: shipmentCode || null }),
     // Activation codes (mã kích hoạt thiết bị)
