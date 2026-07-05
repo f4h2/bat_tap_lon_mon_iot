@@ -20,4 +20,9 @@ public interface TelemetryRecordRepository extends JpaRepository<TelemetryRecord
     List<String> findDistinctShipmentCodesByDeviceId(@org.springframework.data.repository.query.Param("deviceId") String deviceId);
 
     long countByDeviceId(String deviceId);
+
+    // Tập record_hash của 1 thiết bị (mọi đơn ship) — để kiểm tra liên kết hash chain.
+    @org.springframework.data.jpa.repository.Query(
+        "select t.recordHash from TelemetryRecord t where t.deviceId = :deviceId")
+    List<String> findRecordHashesByDeviceId(@org.springframework.data.repository.query.Param("deviceId") String deviceId);
 }

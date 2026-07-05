@@ -20,10 +20,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -96,14 +97,16 @@ public class ShipmentQueryService {
      * previous_hash của bản ghi phải khớp record_hash của bản ghi liền trước (hoặc GENESIS).
      */
     private Map<UUID, Boolean> computeChainLinkage(List<TelemetryRecord> records) {
-        List<TelemetryRecord> asc = new ArrayList<>(records);
-        asc.sort(Comparator.comparing(TelemetryRecord::getCreatedAt).thenComparing(TelemetryRecord::getDeviceTimestamp));
-        Map<String, String> lastHashByDevice = new HashMap<>();
+        // Hash chain là theo THIẾT BỊ (xuyên suốt mọi đơn ship), còn màn này query theo đơn ship.
+        // Nên không so theo thứ tự cục bộ; thay vào đó kiểm tra previous_hash có trỏ tới MỘT bản
+        // ghi có thật của thiết bị hay không (hoặc GENESIS cho bản đầu tiên của thiết bị).
+        Map<String, Set<String>> deviceHashes = new HashMap<>();
         Map<UUID, Boolean> chainOk = new HashMap<>();
-        for (TelemetryRecord r : asc) {
-            String expectedPrev = lastHashByDevice.getOrDefault(r.getDeviceId(), "GENESIS");
-            chainOk.put(r.getId(), expectedPrev.equals(r.getPreviousHash()));
-            lastHashByDevice.put(r.getDeviceId(), r.getRecordHash());
+        for (TelemetryRecord r : records) {
+            Set<String> hashes = deviceHashes.computeIfAbsent(r.getDeviceId(),
+                    id -> new HashSet<>(telemetryRepository.findRecordHashesByDeviceId(id)));
+            boolean ok = "GENESIS".equals(r.getPreviousHash()) || hashes.contains(r.getPreviousHash());
+            chainOk.put(r.getId(), ok);
         }
         return chainOk;
     }
