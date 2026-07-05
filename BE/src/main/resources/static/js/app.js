@@ -455,7 +455,6 @@
     const tempVal = num(item.temperature) + "°C";
     const humVal = num(item.humidity) + "%";
     const batVal = num(item.battery, 0) + "%";
-    const rssiVal = num(item.rssi, 0) + " dBm";
     const statusText = item.tampered ? "Bị sửa đổi ⚠" : "Toàn vẹn ✔";
     const statusClass = item.tampered ? "t-err" : "t-ok";
     
@@ -468,9 +467,6 @@
     ]));
     tooltipEl.appendChild(h("div", { class: "tooltip-row" }, [
       h("span", null, "Pin:"), h("span", { class: "tooltip-val" }, batVal)
-    ]));
-    tooltipEl.appendChild(h("div", { class: "tooltip-row" }, [
-      h("span", null, "Tín hiệu:"), h("span", { class: "tooltip-val" }, rssiVal)
     ]));
     tooltipEl.appendChild(h("div", { class: "tooltip-row" }, [
       h("span", null, "Trạng thái:"), h("span", { class: "tooltip-val " + statusClass }, statusText)
@@ -676,7 +672,7 @@
         h("ol", { style: "margin:0;padding-left:18px;color:#355a79;font-size:14px;line-height:1.9" }, [
           h("li", null, "Giai đoạn 1 — Tạo chuyến hàng & sinh mã kích hoạt (tab Chuyến hàng, Mã kích hoạt)."),
           h("li", null, "Giai đoạn 2 — ESP32 dùng verify code để provisioning, xuất hiện ở tab Thiết bị."),
-          h("li", null, "Giai đoạn 3 — Thiết bị gửi telemetry (nhiệt độ, độ ẩm, GPS, pin, RSSI); xem ở tab Giám sát."),
+          h("li", null, "Giai đoạn 3 — Thiết bị gửi telemetry (nhiệt độ, độ ẩm, GPS, pin); xem ở tab Giám sát."),
         ]),
       ]));
     } catch (err) { showError(err); }
@@ -1095,7 +1091,32 @@
   }
 
   /* ---- Giám sát (telemetry + GPS + cảnh báo) ---- */
-  let monitorState = { code: null, shellFor: null, refs: null, gpsTab: "map", gpsMap: null, gpsRouteLayer: null, lastCoords: [], gpsFitted: false, roadRoute: null, roadRouteKey: null, roadRouteFetching: null };
+  let monitorState = { code: null, shellFor: null, refs: null, gpsTab: "map", gpsMap: null, gpsRouteLayer: null, lastCoords: [], gpsFitted: false, roadRoute: null, roadRouteKey: null, roadRouteFetching: null, chartRange: "all" };
+
+  // Cửa sổ thời gian cho biểu đồ nhiệt độ & độ ẩm (tính từ bản ghi mới nhất trở về trước).
+  const CHART_RANGES = [
+    { key: "1m", label: "1m", sec: 60 },
+    { key: "15m", label: "15m", sec: 900 },
+    { key: "1h", label: "1h", sec: 3600 },
+    { key: "1d", label: "1d", sec: 86400 },
+    { key: "all", label: "Tất cả", sec: null },
+  ];
+  function chartRangeSec() {
+    const r = CHART_RANGES.find((x) => x.key === monitorState.chartRange);
+    return r ? r.sec : null;
+  }
+  // Telemetry đã lọc theo cửa sổ thời gian, trả mảng ASC theo thời gian (device_timestamp epoch giây).
+  function chartPointsAsc() {
+    const asc = (monitorState.lastTele || []).slice().reverse();
+    const sec = chartRangeSec();
+    if (!sec || !asc.length) return asc;
+    const latestTs = asc[asc.length - 1].device_timestamp;
+    if (latestTs == null) return asc;
+    return asc.filter((t) => t.device_timestamp != null && t.device_timestamp >= latestTs - sec);
+  }
+  function chartSeries() {
+    return chartPointsAsc().map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
+  }
 
   async function viewMonitor() {
     setHeader("Giám sát", "Telemetry thời gian thực: nhiệt độ, độ ẩm, định vị GPS, pin, tín hiệu & cảnh báo.");
@@ -1201,8 +1222,28 @@
     const metricsHost = h("div", { class: "metric-row" });
 
     const chartCanvas = h("canvas");
+    const rangeBar = h("div", { class: "tabs" });
+    const renderRangeBar = () => {
+      clear(rangeBar);
+      CHART_RANGES.forEach((rg) => {
+        const b = h("button", { class: "tab-btn" + (monitorState.chartRange === rg.key ? " active" : "") }, rg.label);
+        b.addEventListener("click", () => {
+          if (monitorState.chartRange === rg.key) return;
+          monitorState.chartRange = rg.key;
+          monitorState.hoveredIndex = null;
+          hideTooltip();
+          renderRangeBar();
+          drawTimeSeries(chartCanvas, chartSeries(), band, null);
+        });
+        rangeBar.appendChild(b);
+      });
+    };
+    renderRangeBar();
     const chartPanel = h("div", { class: "panel", style: "margin-top:16px;box-shadow:none;border-color:#eef2f7" }, [
-      h("div", { class: "panel-title" }, ["Biểu đồ nhiệt độ & độ ẩm ", h("small", null, band ? `ngưỡng: ${band.min}÷${band.max}°C · độ ẩm ${band.minHum != null ? band.minHum + "÷" + band.maxHum + "%" : "—"}` : "")]),
+      h("div", { class: "panel-head" }, [
+        h("div", { class: "panel-title" }, ["Biểu đồ nhiệt độ & độ ẩm ", h("small", null, band ? `ngưỡng: ${band.min}÷${band.max}°C · độ ẩm ${band.minHum != null ? band.minHum + "÷" + band.maxHum + "%" : "—"}` : "")]),
+        rangeBar,
+      ]),
       h("div", { class: "chart-wrap" }, chartCanvas),
       h("div", { class: "legend" }, [h("span", { class: "l-temp" }, "Nhiệt độ (°C)"), h("span", { class: "l-hum" }, "Độ ẩm (%)"), h("span", { style: "color:#c53030" }, "● Vi phạm ngưỡng"), h("span", { style: "color:#c53030" }, "◯ Bị sửa đổi")]),
     ]);
@@ -1263,33 +1304,25 @@
       const W = chartCanvas.clientWidth;
       const padL = 42, padR = 42;
       const plotW = W - padL - padR;
-      const curTele = monitorState.lastTele || [];
-      if (!curTele.length) return;
-      const points = curTele.slice().reverse(); // ASC order
+      const points = chartPointsAsc(); // ASC order, đã lọc theo cửa sổ thời gian
+      if (!points.length) return;
       if (mouseX >= padL && mouseX <= W - padR) {
         const hoveredIdx = Math.round(((mouseX - padL) * (points.length - 1)) / plotW);
         if (hoveredIdx >= 0 && hoveredIdx < points.length) {
           monitorState.hoveredIndex = hoveredIdx;
-          const series = points.map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
-          drawTimeSeries(chartCanvas, series, band, hoveredIdx);
+          drawTimeSeries(chartCanvas, chartSeries(), band, hoveredIdx);
           showTooltip(e, points[hoveredIdx], rect);
           return;
         }
       }
       hideTooltip();
-      const series = points.map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
-      drawTimeSeries(chartCanvas, series, band, null);
+      drawTimeSeries(chartCanvas, chartSeries(), band, null);
     });
 
     chartCanvas.addEventListener("mouseleave", () => {
       monitorState.hoveredIndex = null;
       hideTooltip();
-      const curTele = monitorState.lastTele || [];
-      if (curTele.length) {
-        const points = curTele.slice().reverse();
-        const series = points.map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
-        drawTimeSeries(chartCanvas, series, band, null);
-      }
+      if (chartPointsAsc().length) drawTimeSeries(chartCanvas, chartSeries(), band, null);
     });
 
     body.appendChild(warnHost);
@@ -1317,8 +1350,7 @@
     const warnRisk = tele.filter(t => {
       if (t.tampered || (band && (t.temperature < band.min || t.temperature > band.max))) return false;
       return (band && (band.minHum != null && band.maxHum != null && (t.humidity < band.minHum || t.humidity > band.maxHum))) ||
-             (t.battery != null && t.battery < 20) ||
-             (t.rssi != null && t.rssi < -85);
+             (t.battery != null && t.battery < 20);
     }).length;
     const safeRecords = Math.max(0, totalRecords - highRisk - warnRisk);
 
@@ -1343,7 +1375,6 @@
       m("Nhiệt độ", latest ? num(latest.temperature) : "—", "°C", tempDanger),
       m("Độ ẩm", latest ? num(latest.humidity) : "—", "%"),
       m("Pin", latest ? num(latest.battery, 0) : "—", "%"),
-      m("Tín hiệu", latest ? num(latest.rssi, 0) : "—", "dBm"),
       m("Vị trí", latest ? `${num(latest.lat, 4)}, ${num(latest.lng, 4)}` : "—", ""),
     ].forEach((x) => r.metricsHost.appendChild(x));
 
@@ -1357,9 +1388,8 @@
       ]));
     }
 
-    // chart (đánh dấu điểm bị sửa đổi)
-    const series = asc.map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered }));
-    requestAnimationFrame(() => drawTimeSeries(r.chartCanvas, series, band, monitorState.hoveredIndex));
+    // chart (đánh dấu điểm bị sửa đổi) — lọc theo cửa sổ thời gian đang chọn
+    requestAnimationFrame(() => drawTimeSeries(r.chartCanvas, chartSeries(), band, monitorState.hoveredIndex));
 
     // GPS: canvas + leaflet + nút Google
     const coords = asc.map((t) => ({ lat: t.lat != null ? Number(t.lat) : null, lng: t.lng != null ? Number(t.lng) : null }));
@@ -1406,14 +1436,13 @@
     const telePage = tele.length ? Math.min(monitorState.telePage || 0, Math.ceil(tele.length / TELE_PER_PAGE) - 1) : 0;
     monitorState.telePage = telePage;
     if (tele.length) r.tableHost.appendChild(h("div", { style: "overflow-x:auto" }, h("table", null, [
-      h("thead", null, h("tr", null, ["Thời gian", "Device", "Nhiệt độ", "Độ ẩm", "Pin", "RSSI", "GPS", "Record hash", "Toàn vẹn"].map((t) => h("th", null, t)))),
+      h("thead", null, h("tr", null, ["Thời gian", "Device", "Nhiệt độ", "Độ ẩm", "Pin", "GPS", "Record hash", "Toàn vẹn"].map((t) => h("th", null, t)))),
       h("tbody", null, tele.slice(telePage * TELE_PER_PAGE, (telePage + 1) * TELE_PER_PAGE).map((t) => h("tr", { class: t.tampered ? "row-tampered" : "" }, [
         h("td", null, fmtEpoch(t.device_timestamp)),
         h("td", null, h("span", { class: "mono" }, short(t.device_id, 10))),
         h("td", null, num(t.temperature) + "°C"),
         h("td", null, num(t.humidity) + "%"),
         h("td", null, num(t.battery, 0) + "%"),
-        h("td", null, num(t.rssi, 0)),
         h("td", null, h("span", { class: "mono" }, `${num(t.lat, 4)}, ${num(t.lng, 4)}`)),
         h("td", null, h("span", { class: "mono hash", title: t.record_hash }, short(t.record_hash, 14))),
         h("td", null, t.tampered
