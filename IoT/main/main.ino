@@ -454,10 +454,44 @@ void factoryResetAndReboot() {
 
 static void initGpsIfEnabled() {
   if (USE_GPS_SENSOR) {
+    gpsSerial.setRxBufferSize(1024);   // tang buffer, tranh tran FIFO khi ban
     gpsSerial.begin(9600, SERIAL_8N1, GPS_RX_PIN, GPS_TX_PIN);
-    Serial.println("[GPS] Bat GPS UART.");
+    Serial.printf("[GPS] Bat GPS UART @9600 (ESP32 RX=GPIO%d <- GPS TX, ESP32 TX=GPIO%d -> GPS RX).\n",
+                  GPS_RX_PIN, GPS_TX_PIN);
   } else {
     Serial.println("[GPS] Dang dung che do mo phong.");
+  }
+}
+
+// Bom lien tuc byte tu GPS vao parser. PHAI goi moi vong loop() de tranh tran
+// FIFO UART, neu khong TinyGPS se khong bao gio rap du 1 cau NMEA hop le.
+static void feedGps() {
+  if (!USE_GPS_SENSOR) return;
+  while (gpsSerial.available() > 0) {
+    gps.encode(gpsSerial.read());
+  }
+}
+
+// In trang thai GPS dinh ky de chan doan (wiring vs. chua co fix).
+static void gpsStatusTask() {
+  if (!USE_GPS_SENSOR) return;
+  static uint32_t last = 0;
+  if (millis() - last < 3000) return;
+  last = millis();
+  uint32_t chars = gps.charsProcessed();
+  if (chars == 0) {
+    Serial.println("[GPS] Chua nhan duoc byte nao. Kiem tra: GPS TX -> ESP32 GPIO16, nguon 3V3/5V, baud 9600.");
+    return;
+  }
+  if (gps.location.isValid()) {
+    Serial.printf("[GPS] FIX OK sats=%lu hdop=%.1f lat=%.6f lng=%.6f (chars=%lu)\n",
+                  (unsigned long)gps.satellites.value(),
+                  gps.hdop.isValid() ? gps.hdop.hdop() : 0.0,
+                  gps.location.lat(), gps.location.lng(), (unsigned long)chars);
+  } else {
+    Serial.printf("[GPS] Dang tim ve tinh... sats=%lu chars=%lu checksumFail=%lu (dua anten ra troi thoang, cho 30s-2phut)\n",
+                  (unsigned long)gps.satellites.value(), (unsigned long)chars,
+                  (unsigned long)gps.failedChecksum());
   }
 }
 
@@ -517,13 +551,16 @@ static SensorSnapshot readSensors() {
   }
 
   if (USE_GPS_SENSOR) {
-    while (gpsSerial.available() > 0) {
-      gps.encode(gpsSerial.read());
-    }
-    s.gps_valid = gps.location.isValid();
+    feedGps();                                  // vet not byte con lai trong buffer
+    // Coi la co du lieu neu vi tri hop le VA con moi (cap nhat < 5s truoc).
+    s.gps_valid = gps.location.isValid() && gps.location.age() < 5000;
     s.gps_lat = s.gps_valid ? gps.location.lat() : 10.7769;
     s.gps_lng = s.gps_valid ? gps.location.lng() : 106.7009;
     s.sim_gps = !s.gps_valid;
+    if (!s.gps_valid) {
+      Serial.printf("[TELEMETRY] Chua co fix GPS (sats=%lu) -> bo qua lat/lng lan nay.\n",
+                    (unsigned long)gps.satellites.value());
+    }
   } else {
     s.gps_valid = false;
     s.gps_lat = 10.7769 + pseudoNoise(-0.005f, 0.005f);
@@ -776,6 +813,8 @@ void loop() {
 
   server.handleClient();
   ledTask();
+  feedGps();          // doc GPS lien tuc de tich luy fix
+  gpsStatusTask();    // log trang thai GPS moi 3s
 
   if (millis() - last_send_ms >= TELEMETRY_INTERVAL_MS) {
     last_send_ms = millis();

@@ -11,9 +11,9 @@
 #define BATTERY_ADC_PIN   34
 
 // Bat/tat theo phan cung that hien co.
-#define USE_GPS_SENSOR      false
+#define USE_GPS_SENSOR      true
 #define USE_BLE_SCANNER     false
-#define USE_BATTERY_SENSOR  false
+#define USE_BATTERY_SENSOR  true
 #define USE_DHT_SENSOR      true
 
 // LCD I2C (mach chuyen doi giao tiep PCF8574) hien thi nhiet do / do am

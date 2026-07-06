@@ -383,6 +383,21 @@
       }
     }
 
+    // vùng MẤT DỮ LIỆU: tô cam giữa 2 điểm liên tiếp cách nhau quá ngưỡng gapWarnSec
+    const gapSec = (monitorState.cfg && monitorState.cfg.gapWarnSec) || 0;
+    if (gapSec > 0) {
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1], b = points[i];
+        if (a.ts == null || b.ts == null || (b.ts - a.ts) <= gapSec) continue;
+        const x0 = x(i - 1), x1 = x(i);
+        ctx.fillStyle = "rgba(217,119,6,.16)";
+        ctx.fillRect(x0, padT, x1 - x0, plotH);
+        ctx.strokeStyle = "rgba(217,119,6,.55)"; ctx.lineWidth = 1; ctx.setLineDash([3, 3]);
+        [x0, x1].forEach((xx) => { ctx.beginPath(); ctx.moveTo(xx, padT); ctx.lineTo(xx, padT + plotH); ctx.stroke(); });
+        ctx.setLineDash([]);
+      }
+    }
+
     // dải ngưỡng nhiệt độ cho phép (trục trái, xanh lá)
     if (band) {
       ctx.fillStyle = "rgba(31,157,85,.10)";
@@ -1141,6 +1156,104 @@
     return chartPointsAsc().map((t) => ({ t: t.temperature != null ? Number(t.temperature) : null, h: t.humidity != null ? Number(t.humidity) : null, bad: !!t.tampered, ts: t.device_timestamp != null ? Number(t.device_timestamp) : null }));
   }
 
+  /* ---- Ngưỡng cảnh báo vận chuyển (cấu hình, lưu localStorage) ---- */
+  const MON_CFG_KEY = "coldchain_monitor_cfg";
+  const MON_CFG_DEFAULTS = {
+    gapWarnSec: 120,     // mất dữ liệu > ngưỡng này -> cảnh báo thiết bị tắt/mất kết nối
+    stopWindowSec: 300,  // đứng yên liên tục >= ngưỡng này -> cảnh báo dừng đột ngột
+    stopRadiusM: 40,     // bán kính (m) coi là "không di chuyển"
+  };
+  function loadMonCfg() {
+    try { return Object.assign({}, MON_CFG_DEFAULTS, JSON.parse(localStorage.getItem(MON_CFG_KEY) || "{}")); }
+    catch (_) { return Object.assign({}, MON_CFG_DEFAULTS); }
+  }
+  function saveMonCfg(cfg) { try { localStorage.setItem(MON_CFG_KEY, JSON.stringify(cfg)); } catch (_) {} }
+
+  // Khoảng cách hai điểm GPS (mét) — công thức haversine.
+  function haversineM(a, b) {
+    const R = 6371000, toRad = (d) => (d * Math.PI) / 180;
+    const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+    const s = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+  }
+  // Định dạng khoảng thời gian ngắn tiếng Việt.
+  function fmtDurVi(sec) {
+    sec = Math.round(sec);
+    if (sec < 60) return sec + " giây";
+    const m = Math.floor(sec / 60), s = sec % 60;
+    if (m < 60) return s ? `${m} phút ${s} giây` : `${m} phút`;
+    const hh = Math.floor(m / 60), mm = m % 60;
+    return mm ? `${hh} giờ ${mm} phút` : `${hh} giờ`;
+  }
+  // Phát hiện khoảng MẤT DỮ LIỆU: 2 bản ghi liên tiếp cách nhau > gapSec.
+  function analyzeGaps(asc, gapSec) {
+    const gaps = [];
+    for (let i = 1; i < asc.length; i++) {
+      const t0 = asc[i - 1].device_timestamp, t1 = asc[i].device_timestamp;
+      if (t0 == null || t1 == null) continue;
+      const d = t1 - t0;
+      if (d > gapSec) gaps.push({ fromTs: t0, toTs: t1, durationSec: d, fromIdx: i - 1, toIdx: i });
+    }
+    return gaps;
+  }
+  // Phát hiện đoạn ĐỨNG YÊN: các điểm liên tiếp nằm trong bán kính radiusM quanh mỏ neo,
+  // kéo dài >= windowSec -> coi là dừng/không di chuyển.
+  function analyzeStops(asc, windowSec, radiusM) {
+    const pts = asc.filter((t) => t.lat != null && t.lng != null && t.device_timestamp != null)
+      .map((t) => ({ lat: Number(t.lat), lng: Number(t.lng), ts: Number(t.device_timestamp) }));
+    const stops = [];
+    let i = 0;
+    while (i < pts.length) {
+      let j = i + 1;
+      const anchor = pts[i];
+      while (j < pts.length && haversineM(anchor, pts[j]) <= radiusM) j++;
+      const last = pts[j - 1];
+      const dur = last.ts - anchor.ts;
+      if (j - i >= 2 && dur >= windowSec) {
+        stops.push({ startTs: anchor.ts, endTs: last.ts, durationSec: dur, lat: anchor.lat, lng: anchor.lng, count: j - i });
+        i = j; // nhảy qua cả cụm để không đếm trùng
+      } else {
+        i++;
+      }
+    }
+    return stops;
+  }
+
+  // Modal cấu hình ngưỡng cảnh báo vận chuyển.
+  function showMonitorConfigModal(onSaved) {
+    const cfg = loadMonCfg();
+    const field = (label, hint, val, min, step) => {
+      const inp = h("input", { type: "number", value: String(val), min: String(min), step: String(step) });
+      return { inp, node: h("div", { class: "field", style: "margin-bottom:12px" }, [
+        h("label", null, label),
+        inp,
+        h("span", { class: "hint" }, hint),
+      ]) };
+    };
+    const gap = field("Ngưỡng mất dữ liệu (giây)", "Không nhận telemetry lâu hơn mức này khi đang vận chuyển sẽ bị cảnh báo.", cfg.gapWarnSec, 10, 10);
+    const win = field("Cửa sổ đứng yên (giây)", "Đứng yên liên tục ≥ mức này bị coi là dừng đột ngột (300 = 5 phút).", cfg.stopWindowSec, 30, 30);
+    const rad = field("Bán kính không di chuyển (mét)", "Dịch chuyển trong bán kính này coi như không di chuyển (sai số GPS ~10–30m).", cfg.stopRadiusM, 5, 5);
+    const body = h("div", null, [
+      h("p", { class: "page-sub", style: "margin-top:0" }, "Ngưỡng dùng để tô cảnh báo trên biểu đồ & bản đồ của màn Giám sát. Lưu tại trình duyệt này."),
+      gap.node, win.node, rad.node,
+      h("div", { style: "display:flex;gap:8px;justify-content:flex-end;margin-top:8px" }, [
+        h("button", { class: "btn btn-ghost", onclick: () => document.querySelectorAll(".modal-overlay").forEach((x) => x.remove()) }, "Huỷ"),
+        h("button", { class: "btn btn-primary", onclick: () => {
+          const next = {
+            gapWarnSec: Math.max(10, Number(gap.inp.value) || MON_CFG_DEFAULTS.gapWarnSec),
+            stopWindowSec: Math.max(30, Number(win.inp.value) || MON_CFG_DEFAULTS.stopWindowSec),
+            stopRadiusM: Math.max(5, Number(rad.inp.value) || MON_CFG_DEFAULTS.stopRadiusM),
+          };
+          saveMonCfg(next);
+          monitorState.cfg = next;
+          document.querySelectorAll(".modal-overlay").forEach((x) => x.remove());
+          if (onSaved) onSaved();
+        } }, "Lưu ngưỡng"),
+      ]),
+    ]);
+    showModal("Ngưỡng cảnh báo vận chuyển", body);
+  }
+
   async function viewMonitor() {
     setHeader("Giám sát", "Telemetry thời gian thực: nhiệt độ, độ ẩm, định vị GPS, pin, tín hiệu & cảnh báo.");
     setLoading();
@@ -1182,7 +1295,10 @@
           select,
           searchBox("Lọc chuyến hàng…", fillOptions),
         ]),
-        h("span", { class: "auto-tag" }, [h("span", { class: "pulse" }), "Tự động làm mới mỗi 5 giây"]),
+        h("div", { style: "display:flex;align-items:center;gap:12px" }, [
+          h("button", { class: "btn btn-ghost", style: "font-size:12px;padding:5px 10px", onclick: () => showMonitorConfigModal(() => loadMonitorData(shipments)) }, "⚙ Ngưỡng cảnh báo"),
+          h("span", { class: "auto-tag" }, [h("span", { class: "pulse" }), "Tự động làm mới mỗi 5 giây"]),
+        ]),
       ]),
       h("div", { id: "monitorBody" }, h("div", { class: "loading" }, "Đang tải telemetry…")),
     ]));
@@ -1268,7 +1384,7 @@
         rangeBar,
       ]),
       h("div", { class: "chart-wrap" }, chartCanvas),
-      h("div", { class: "legend" }, [h("span", { class: "l-temp" }, "Nhiệt độ (°C)"), h("span", { class: "l-hum" }, "Độ ẩm (%)"), h("span", { style: "color:#c53030" }, "● Vi phạm ngưỡng"), h("span", { style: "color:#c53030" }, "◯ Bị sửa đổi")]),
+      h("div", { class: "legend" }, [h("span", { class: "l-temp" }, "Nhiệt độ (°C)"), h("span", { class: "l-hum" }, "Độ ẩm (%)"), h("span", { style: "color:#c53030" }, "● Vi phạm ngưỡng"), h("span", { style: "color:#c53030" }, "◯ Bị sửa đổi"), h("span", { style: "color:#d97706" }, "▨ Mất dữ liệu")]),
     ]);
 
     // GPS panel: 2 tab (Sơ đồ offline / Bản đồ OpenStreetMap)
@@ -1411,6 +1527,35 @@
       ]));
     }
 
+    // Phân tích mất dữ liệu & dừng đột ngột theo ngưỡng cấu hình.
+    const cfg = monitorState.cfg || (monitorState.cfg = loadMonCfg());
+    const inTransit = ship && ship.status === "ACTIVE";
+    const gaps = analyzeGaps(asc, cfg.gapWarnSec);
+    const stops = analyzeStops(asc, cfg.stopWindowSec, cfg.stopRadiusM);
+    monitorState.stops = stops;
+    if (gaps.length) {
+      const worst = gaps.reduce((a, b) => (b.durationSec > a.durationSec ? b : a));
+      r.warnHost.appendChild(h("div", { class: "warn-banner" }, [
+        h("span", null, "⏸"),
+        h("span", null, [
+          `Mất dữ liệu ${gaps.length} khoảng${inTransit ? " khi chuyến đang vận chuyển" : ""} — thiết bị có thể bị tắt/mất kết nối. `,
+          h("b", null, `Lâu nhất ${fmtDurVi(worst.durationSec)}`),
+          ` (${fmtEpoch(worst.fromTs)} → ${fmtEpoch(worst.toTs)}).`,
+        ]),
+      ]));
+    }
+    if (stops.length) {
+      const longest = stops.reduce((a, b) => (b.durationSec > a.durationSec ? b : a));
+      r.warnHost.appendChild(h("div", { class: "warn-banner warn-banner-stop" }, [
+        h("span", null, "🛑"),
+        h("span", null, [
+          `Chuyến hàng dừng/không di chuyển ${stops.length} lần (bán kính ≤ ${cfg.stopRadiusM}m). `,
+          h("b", null, `Lâu nhất ${fmtDurVi(longest.durationSec)}`),
+          ` từ ${fmtEpoch(longest.startTs)} tại ${num(longest.lat, 4)}, ${num(longest.lng, 4)}.`,
+        ]),
+      ]));
+    }
+
     // chart (đánh dấu điểm bị sửa đổi) — lọc theo cửa sổ thời gian đang chọn
     requestAnimationFrame(() => drawTimeSeries(r.chartCanvas, chartSeries(), band, monitorState.hoveredIndex));
 
@@ -1529,6 +1674,16 @@
           .catch(() => { monitorState.roadRouteFetching = null; /* giữ đường thẳng làm fallback */ });
       }
     }
+
+    // Điểm DỪNG/không di chuyển: vòng cảnh báo cam + bán kính ngưỡng.
+    const stops = monitorState.stops || [];
+    const stopRadiusM = (monitorState.cfg && monitorState.cfg.stopRadiusM) || 40;
+    stops.forEach((st) => {
+      L.circle([st.lat, st.lng], { radius: stopRadiusM, color: "#d97706", weight: 1, fillColor: "#d97706", fillOpacity: 0.12 }).addTo(layer);
+      L.marker([st.lat, st.lng], { icon: L.divIcon({ className: "", html: "🛑", iconSize: [20, 20] }) })
+        .addTo(layer)
+        .bindTooltip(`Dừng ${fmtDurVi(st.durationSec)}<br>${fmtEpoch(st.startTs)}`, { direction: "top", offset: [0, -6] });
+    });
 
     L.circleMarker(latlngs[0], { radius: 6, color: "#1f9d55", fillColor: "#1f9d55", fillOpacity: 1, weight: 2 }).bindTooltip("Xuất phát").addTo(layer);
     L.circleMarker(latlngs[latlngs.length - 1], { radius: 8, color: "#fff", weight: 2, fillColor: "#e65f2b", fillOpacity: 1 }).bindTooltip("Vị trí hiện tại").addTo(layer);
