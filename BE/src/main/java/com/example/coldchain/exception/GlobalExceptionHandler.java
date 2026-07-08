@@ -12,6 +12,7 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -48,6 +49,14 @@ public class GlobalExceptionHandler {
         log.warn("[API-ERR] {} -> 400 [BAD_REQUEST] {}", reqInfo(req), ex.getMessage());
         return ResponseEntity.badRequest()
                 .body(ErrorResponse.of("BAD_REQUEST", ex.getMessage()));
+    }
+
+    // Tài nguyên tĩnh không tồn tại (vd trình duyệt tự request /favicon.ico) -> 404, không phải 500.
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNoResource(NoResourceFoundException ex, HttpServletRequest req) {
+        log.debug("[API-404] {} -> 404 static resource not found", reqInfo(req));
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ErrorResponse.of("NOT_FOUND", "Resource not found"));
     }
 
     @ExceptionHandler(Exception.class)
