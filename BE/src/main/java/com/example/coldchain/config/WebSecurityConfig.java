@@ -21,7 +21,7 @@ public class WebSecurityConfig {
         http
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/telemetry", "/api/devices/verify", "/api/devices/bind").permitAll()
+                        .requestMatchers("/api/telemetry", "/api/devices/verify", "/api/devices/bind", "/api/devices/reset").permitAll()
                         .anyRequest().authenticated()
                 )
                 .httpBasic(Customizer.withDefaults());

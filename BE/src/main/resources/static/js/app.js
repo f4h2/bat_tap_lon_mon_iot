@@ -163,8 +163,7 @@
     location.hash = "#/monitor";
   }
 
-  // Popup toàn màn hình mô phỏng lộ trình di chuyển 3D (map3d) — hiển thị ngay trong màn Giám sát,
-  // không điều hướng sang route #/map3d.
+  // Popup toàn màn hình mô phỏng lộ trình di chuyển 3D (map3d) — hiển thị ngay trong màn Giám sát.
   function showMap3DModal(shipmentCode) {
     if (!shipmentCode) return;
     sessionStorage.setItem("m3d_shipment", shipmentCode);
@@ -769,13 +768,26 @@
         h("td", null, s.itemType),
         h("td", null, `${num(s.minTemperature)} ÷ ${num(s.maxTemperature)}`),
         h("td", null, `${num(s.minHumidity)} ÷ ${num(s.maxHumidity)}`),
-        h("td", null, (devMap[s.shipmentCode] && devMap[s.shipmentCode].length)
-          ? h("div", { style: "display:flex;flex-direction:column;gap:3px" }, devMap[s.shipmentCode].map((e) =>
-              h("span", { class: "mono link", style: "font-size:12px", title: e.current ? "Đang gắn — xem chi tiết thiết bị" : "Đã gắn (lịch sử) — xem chi tiết", onclick: () => showDeviceDetail(e.deviceId) }, [
-                short(e.deviceId, 14),
-                e.current ? h("span", { class: "badge badge-intact", style: "margin-left:5px;font-size:9px;padding:1px 6px" }, "hiện tại") : "",
-              ])))
-          : h("span", { class: "badge badge-muted" }, "Chưa có")),
+        h("td", null, (() => {
+          const arr = devMap[s.shipmentCode] || [];
+          const hasCurrent = arr.some((e) => e.current);
+          const listNode = arr.length
+            ? h("div", { style: "display:flex;flex-direction:column;gap:3px" }, arr.map((e) =>
+                h("span", { class: "mono link", style: "font-size:12px", title: e.current ? "Đang gắn — xem chi tiết thiết bị" : "Đã gắn (lịch sử) — xem chi tiết", onclick: () => showDeviceDetail(e.deviceId) }, [
+                  short(e.deviceId, 14),
+                  e.current ? h("span", { class: "badge badge-intact", style: "margin-left:5px;font-size:9px;padding:1px 6px" }, "hiện tại") : "",
+                ])))
+            : null;
+          // Chuyến ĐANG hoạt động mà không còn thiết bị nào đang gắn (thiết bị reset/gỡ) -> cảnh báo.
+          if (s.status === "ACTIVE" && !hasCurrent) {
+            return h("div", { style: "display:flex;flex-direction:column;gap:4px" }, [
+              h("span", { class: "badge badge-warn", title: "Chuyến đang hoạt động nhưng không có thiết bị đang gắn (có thể thiết bị đã reset). Gắn lại thiết bị để tiếp tục nhận dữ liệu." },
+                arr.length ? "⚠ Mất thiết bị" : "⚠ Chưa gắn thiết bị"),
+              listNode || "",
+            ]);
+          }
+          return listNode || h("span", { class: "badge badge-muted" }, "Chưa có");
+        })()),
         h("td", null, statusBadge(s.status)),
         h("td", null, fmtDateTime(s.createdAt)),
         h("td", null, [
@@ -1314,7 +1326,9 @@
     if (!body) return;
     const ship = shipments.find((s) => s.shipmentCode === code) || {};
     try {
-      const [tele, alerts] = await Promise.all([Api.telemetry(code), Api.alerts(code)]);
+      const [tele, alerts, devices] = await Promise.all([Api.telemetry(code), Api.alerts(code), Api.listDevices()]);
+      // Thiết bị ĐANG gắn (ACTIVE) cho chuyến này — rỗng nghĩa là mất thiết bị (reset/gỡ).
+      monitorState.boundDevices = (devices || []).filter((d) => d.shipmentCode === code && String(d.status) === "ACTIVE");
       if (monitorState.shellFor !== code) { buildMonitorShell(body, ship); monitorState.shellFor = code; }
       updateMonitorData(ship, tele, alerts);
     } catch (err) {
@@ -1520,6 +1534,19 @@
     // banner cảnh báo sửa đổi
     const tamperedCount = tele.filter((t) => t.tampered).length;
     clear(r.warnHost);
+
+    // Chuyến ĐANG hoạt động nhưng không còn thiết bị nào đang gắn (thiết bị có thể đã reset).
+    if (ship && ship.status === "ACTIVE" && (!monitorState.boundDevices || !monitorState.boundDevices.length)) {
+      r.warnHost.appendChild(h("div", { class: "warn-banner warn-banner-nodev" }, [
+        h("span", null, "📴"),
+        h("span", null, [
+          "Chuyến đang hoạt động nhưng ", h("b", null, "không có thiết bị nào đang gắn"),
+          " — thiết bị có thể đã bị reset. Dữ liệu sẽ không cập nhật cho tới khi gắn lại thiết bị: kích hoạt lại thiết bị rồi quét QR đơn, hoặc vào ",
+          h("b", null, "Thiết bị → Gắn đơn ship"), ".",
+        ]),
+      ]));
+    }
+
     if (tamperedCount > 0) {
       r.warnHost.appendChild(h("div", { class: "tamper-banner" }, [
         h("span", null, "⚠"),
@@ -1785,19 +1812,12 @@
   /* ============================================================
    *  Router
    * ============================================================ */
-  // Trang "Lộ trình di chuyển" (bản đồ 3D) tách riêng trong js/map3d.js.
-  function viewMap3D() {
-    if (window.Map3D) window.Map3D.view(view, setHeader);
-    else { setHeader("Lộ trình di chuyển", ""); view.innerHTML = ""; view.appendChild(h("div", { class: "empty" }, "Thiếu js/map3d.js")); }
-  }
-
   const routes = {
     overview: viewOverview,
     shipments: viewShipments,
     codes: viewCodes,
     devices: viewDevices,
     monitor: viewMonitor,
-    map3d: viewMap3D,
     integrity: viewIntegrity,
   };
 

@@ -1,6 +1,7 @@
 package com.example.coldchain.controller;
 
 import com.example.coldchain.dto.DeviceBindResponse;
+import com.example.coldchain.dto.DeviceResetResponse;
 import com.example.coldchain.dto.DeviceVerifyRequest;
 import com.example.coldchain.dto.DeviceVerifyResponse;
 import com.example.coldchain.service.DeviceBindService;
@@ -37,5 +38,14 @@ public class DeviceController {
             @RequestBody String rawPayload
     ) {
         return ResponseEntity.ok(bindService.bind(deviceId, apiKey, timestamp, nonce, signature, rawPayload));
+    }
+
+    // Thiết bị báo đã bị reset (trước khi wipe NVS) -> backend chuyển device sang DISABLED.
+    @PostMapping("/reset")
+    public ResponseEntity<DeviceResetResponse> reset(
+            @RequestHeader(value = "X-Device-Id", required = false) String deviceId,
+            @RequestHeader(value = "X-Api-Key", required = false) String apiKey
+    ) {
+        return ResponseEntity.ok(provisioningService.reset(deviceId, apiKey));
     }
 }

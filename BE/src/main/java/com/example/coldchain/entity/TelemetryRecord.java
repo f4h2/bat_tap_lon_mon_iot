@@ -54,6 +54,14 @@ public class TelemetryRecord {
     @Column(name = "canonical_request", nullable = false, columnDefinition = "text")
     private String canonicalRequest;
 
+    // Snapshot khóa ký của thiết bị TẠI THỜI ĐIỂM ghi (để verify chữ ký đúng kể cả sau khi
+    // thiết bị reset & đổi khóa). Null với bản ghi cũ trước migration V5 -> fallback khóa hiện tại.
+    @Column(name = "public_key_pem", columnDefinition = "text")
+    private String publicKeyPem;
+
+    @Column(name = "signature_algorithm", length = 64)
+    private String signatureAlgorithm;
+
     @Column(name = "device_timestamp", nullable = false)
     private Long deviceTimestamp;
 
@@ -99,6 +107,10 @@ public class TelemetryRecord {
     public void setRecordHash(String recordHash) { this.recordHash = recordHash; }
     public String getCanonicalRequest() { return canonicalRequest; }
     public void setCanonicalRequest(String canonicalRequest) { this.canonicalRequest = canonicalRequest; }
+    public String getPublicKeyPem() { return publicKeyPem; }
+    public void setPublicKeyPem(String publicKeyPem) { this.publicKeyPem = publicKeyPem; }
+    public String getSignatureAlgorithm() { return signatureAlgorithm; }
+    public void setSignatureAlgorithm(String signatureAlgorithm) { this.signatureAlgorithm = signatureAlgorithm; }
     public Long getDeviceTimestamp() { return deviceTimestamp; }
     public void setDeviceTimestamp(Long deviceTimestamp) { this.deviceTimestamp = deviceTimestamp; }
     public String getNonce() { return nonce; }

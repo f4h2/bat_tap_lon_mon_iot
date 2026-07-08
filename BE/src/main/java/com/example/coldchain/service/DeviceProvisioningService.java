@@ -1,6 +1,7 @@
 package com.example.coldchain.service;
 
 import com.example.coldchain.config.SecurityProperties;
+import com.example.coldchain.dto.DeviceResetResponse;
 import com.example.coldchain.dto.DeviceVerifyRequest;
 import com.example.coldchain.dto.DeviceVerifyResponse;
 import com.example.coldchain.entity.Device;
@@ -88,6 +89,39 @@ public class DeviceProvisioningService {
 
         auditService.success("DEVICE", deviceId, "DEVICE_ACTIVATE", existing ? "Device re-activated" : "Device activated");
         return new DeviceVerifyResponse(deviceId, apiKey, DeviceStatus.ACTIVE.name(), null);
+    }
+
+    /**
+     * Thiết bị báo đã bị RESET (xóa credentials phía thiết bị) -> chuyển sang DISABLED và gỡ đơn ship.
+     * Xác thực bằng api_key hiện tại (thiết bị gọi trước khi wipe NVS). Sau đó telemetry của thiết bị
+     * sẽ bị từ chối cho tới khi kích hoạt lại (verify).
+     */
+    @Transactional
+    public DeviceResetResponse reset(String deviceId, String apiKey) {
+        String id = require(deviceId, "X-Device-Id");
+        String key = require(apiKey, "X-Api-Key");
+        Device device = deviceRepository.findById(id)
+                .orElseThrow(() -> ApiException.unauthorized("DEVICE_NOT_FOUND", "Unknown device"));
+
+        String requestHash = ApiKeyUtil.hmacSha256Hex(key, securityProperties.apiKeyPepper());
+        if (!ApiKeyUtil.constantTimeEquals(requestHash, device.getApiKeyHash())) {
+            auditService.fail("DEVICE", id, "DEVICE_RESET", "Invalid API key");
+            throw ApiException.unauthorized("API_KEY_INVALID", "Invalid API key");
+        }
+
+        device.setStatus(DeviceStatus.DISABLED);
+        device.setShipmentCode(null);   // gỡ gắn đơn ship -> ngừng nhận telemetry
+        deviceRepository.save(device);
+
+        auditService.success("DEVICE", id, "DEVICE_RESET", "Device reset -> DISABLED");
+        return new DeviceResetResponse(id, DeviceStatus.DISABLED.name());
+    }
+
+    private String require(String value, String name) {
+        if (value == null || value.isBlank()) {
+            throw ApiException.badRequest("HEADER_REQUIRED", "Missing " + name);
+        }
+        return value.trim();
     }
 
     private void validateAllowedAlgorithm(String algorithm) {

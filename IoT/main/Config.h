@@ -46,6 +46,7 @@ static const uint32_t TELEMETRY_INTERVAL_MS = 5000;
 static const char* SERVER_VERIFY_URL    = "https://iot.tranbadat.vn/api/devices/verify";   // Pha 1: kích hoạt
 static const char* SERVER_BIND_URL      = "https://iot.tranbadat.vn/api/devices/bind";     // Pha 2: gắn đơn ship
 static const char* SERVER_TELEMETRY_URL = "https://iot.tranbadat.vn/api/telemetry";
+static const char* SERVER_RESET_URL     = "https://iot.tranbadat.vn/api/devices/reset";    // Bao server khi reset thiet bi
 
 // Provisioning placeholder mode
 static const bool ENABLE_SERVER_VERIFY = true;

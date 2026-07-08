@@ -443,8 +443,30 @@ bool rebindShipment(const String& shipmentCode) {
   return false;
 }
 
+// Bao cho backend biet thiet bi sap bi reset -> backend chuyen device sang DISABLED.
+// Goi TRUOC khi wipe NVS (con device_id + api_key de xac thuc). Best-effort, khong chan reset.
+static void notifyServerReset() {
+  if (strlen(SERVER_RESET_URL) == 0) return;
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[RESET] Khong co Wi-Fi -> bo qua bao server (van reset cuc bo).");
+    return;
+  }
+  if (strlen(credentials.device_id) == 0 || strlen(credentials.api_key) == 0) {
+    Serial.println("[RESET] Thieu device_id/api_key -> bo qua bao server.");
+    return;
+  }
+  HTTPClient http;
+  beginHttp(http, SERVER_RESET_URL);
+  http.addHeader("X-Device-Id", credentials.device_id);
+  http.addHeader("X-Api-Key", credentials.api_key);
+  int code = http.POST("");
+  Serial.printf("[RESET] Bao server thiet bi reset -> HTTP %d\n", code);
+  http.end();
+}
+
 // Xóa toàn bộ credentials trong NVS rồi khởi động lại -> vào lại luồng kích hoạt.
 void factoryResetAndReboot() {
+  notifyServerReset();   // bao backend TRUOC khi wipe (con credentials de xac thuc)
   preferences.clear();   // xóa namespace "iot-secure" đang mở
   preferences.end();
   delay(200);

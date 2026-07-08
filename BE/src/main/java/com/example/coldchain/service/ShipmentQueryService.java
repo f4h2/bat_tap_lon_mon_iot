@@ -147,13 +147,19 @@ public class ShipmentQueryService {
                 + t.getDeviceTimestamp() + "\n" + t.getNonce() + "\n" + t.getPayloadHash();
         if (!expectedCanonical.equals(t.getCanonicalRequest())) issues.add("CANONICAL_MISMATCH");
 
-        // 6. Chữ ký số ECDSA phải hợp lệ với public key của thiết bị
+        // 6. Chữ ký số ECDSA phải hợp lệ với public key ĐÃ KÝ bản ghi này.
+        //    Ưu tiên khóa snapshot lưu trong bản ghi (đúng kể cả khi thiết bị đã reset & đổi khóa);
+        //    bản ghi cũ (trước V5) chưa có snapshot -> fallback về khóa hiện tại của thiết bị.
         Device device = deviceCache.computeIfAbsent(t.getDeviceId(),
                 id -> deviceRepository.findById(id).orElse(null));
-        if (device == null) {
+        String pubKey = t.getPublicKeyPem();
+        String sigAlg = t.getSignatureAlgorithm();
+        if (pubKey == null || sigAlg == null) {
+            if (device != null) { pubKey = device.getPublicKeyPem(); sigAlg = device.getSignatureAlgorithm(); }
+        }
+        if (pubKey == null || sigAlg == null) {
             issues.add("DEVICE_MISSING");
-        } else if (!signatureService.verify(device.getPublicKeyPem(), device.getSignatureAlgorithm(),
-                t.getCanonicalRequest(), t.getSignature())) {
+        } else if (!signatureService.verify(pubKey, sigAlg, t.getCanonicalRequest(), t.getSignature())) {
             issues.add("SIGNATURE_INVALID");
         }
 

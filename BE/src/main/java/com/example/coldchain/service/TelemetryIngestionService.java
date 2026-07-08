@@ -130,6 +130,9 @@ public class TelemetryIngestionService {
         telemetry.setCanonicalRequest(canonicalRequest);
         telemetry.setDeviceTimestamp(timestamp);
         telemetry.setNonce(cleanNonce);
+        // Ghi kèm khóa ký hiện tại -> verify về sau không phụ thuộc khóa hiện thời của thiết bị.
+        telemetry.setPublicKeyPem(device.getPublicKeyPem());
+        telemetry.setSignatureAlgorithm(device.getSignatureAlgorithm());
         telemetry = telemetryRepository.saveAndFlush(telemetry);
 
         device.setLastSeenAt(Instant.now());
