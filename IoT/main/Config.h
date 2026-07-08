@@ -16,14 +16,19 @@
 #define USE_BATTERY_SENSOR  true
 #define USE_DHT_SENSOR      true
 
-// LCD I2C (mach chuyen doi giao tiep PCF8574) hien thi nhiet do / do am
-// CAN cai thu vien "LiquidCrystal I2C" (Frank de Brabander) trong Library Manager.
+// LCD 1602A "tran" (HD44780, KHONG co mach I2C PCF8574) -> giao tiep song song 4-bit.
+// Dung thu vien "LiquidCrystal" CO SAN trong Arduino IDE (khong can cai them).
+// Dau day: RW -> GND (chi ghi), V0 -> chan giua bien tro 10k de chinh tuong phan,
+//          VDD -> 5V, den nen: A -> 5V qua dien tro ~220, K -> GND.
 #define USE_LCD           true
-#define LCD_I2C_ADDR      0x27   // hoac 0x3F -- dung I2C scanner neu khong hien
 #define LCD_COLS          16     // 16x2; doi thanh 20 neu dung LCD 20x4
 #define LCD_ROWS          2
-#define I2C_SDA_PIN       21     // SDA
-#define I2C_SCL_PIN       22     // SCL
+#define LCD_RS_PIN        13
+#define LCD_EN_PIN        14
+#define LCD_D4_PIN        27
+#define LCD_D5_PIN        26
+#define LCD_D6_PIN        25
+#define LCD_D7_PIN        33
 
 // LED bao trang thai: nhay khi gui telemetry OK, nhay cham khi mat Wi-Fi.
 // LED ngoai: GPIO -> dien tro 220-330 -> chan dai LED -> chan ngan -> GND.
@@ -35,7 +40,7 @@
 static const char* BLE_TARGET_MAC = "";
 
 // Chu ky gui telemetry
-static const uint32_t TELEMETRY_INTERVAL_MS = 10000;
+static const uint32_t TELEMETRY_INTERVAL_MS = 5000;
 
 // API endpoint (doi thanh backend that cua ban)
 static const char* SERVER_VERIFY_URL    = "https://iot.tranbadat.vn/api/devices/verify";   // Pha 1: kích hoạt

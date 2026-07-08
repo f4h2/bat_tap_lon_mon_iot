@@ -19,8 +19,8 @@ public class RateLimitInterceptor implements HandlerInterceptor {
     private final Map<String, Bucket> buckets = new ConcurrentHashMap<>();
 
     private Bucket createNewBucket() {
-        // Limit: 12 requests per minute (1 request per 5 seconds on average)
-        Bandwidth limit = Bandwidth.classic(12, Refill.greedy(12, Duration.ofMinutes(1)));
+        // Limit: 24 requests per minute (device gui moi ~5s = 12/phut, con du bien cho retry/jitter)
+        Bandwidth limit = Bandwidth.classic(24, Refill.greedy(24, Duration.ofMinutes(1)));
         return Bucket.builder().addLimit(limit).build();
     }
 

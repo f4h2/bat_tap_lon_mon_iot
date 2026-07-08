@@ -13,8 +13,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
+#include <LiquidCrystal.h>
 #include <time.h>
 
 #include "mbedtls/md.h"
@@ -33,7 +32,7 @@ TinyGPSPlus gps;
 HardwareSerial gpsSerial(2);
 WebServer server(80);
 Preferences preferences;
-LiquidCrystal_I2C lcd(LCD_I2C_ADDR, LCD_COLS, LCD_ROWS);
+LiquidCrystal lcd(LCD_RS_PIN, LCD_EN_PIN, LCD_D4_PIN, LCD_D5_PIN, LCD_D6_PIN, LCD_D7_PIN);
 
 DeviceCredentials credentials;
 bool web_config_done = false;
@@ -721,11 +720,14 @@ void setup() {
   if (USE_LED) { pinMode(LED_PIN, OUTPUT); digitalWrite(LED_PIN, LOW); }
 
   if (USE_LCD) {
-    Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
-    lcd.init();
-    lcd.backlight();
+    Serial.printf("[LCD] Khoi tao 1602A song song 4-bit: RS=%d E=%d D4=%d D5=%d D6=%d D7=%d, %dx%d\n",
+                  LCD_RS_PIN, LCD_EN_PIN, LCD_D4_PIN, LCD_D5_PIN, LCD_D6_PIN, LCD_D7_PIN, LCD_COLS, LCD_ROWS);
+    lcd.begin(LCD_COLS, LCD_ROWS);   // song song 4-bit; den nen la phan cung
     lcd.setCursor(0, 0); lcd.print("ESP32 ColdChain");
     lcd.setCursor(0, 1); lcd.print("Dang khoi dong..");
+    Serial.println("[LCD] Da gui text test. Neu man trong/den kit -> van bien tro V0 chinh tuong phan.");
+  } else {
+    Serial.println("[LCD] USE_LCD=false -> bo qua.");
   }
 
   device_id = getDeviceIdFromEfuse();
