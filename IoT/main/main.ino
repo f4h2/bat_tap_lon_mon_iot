@@ -683,8 +683,19 @@ static bool sendTelemetryPayload(const SensorSnapshot& sensor) {
   return code > 0 && code < 300;
 }
 
+// Hien 1 thong bao 2 dong len LCD (bo qua neu tat LCD). Tu dem/cat cho vua LCD_COLS cot.
+static void lcdMsg(const char* l1, const char* l2) {
+  if (!USE_LCD) return;
+  char buf[LCD_COLS + 1];
+  snprintf(buf, sizeof(buf), "%-*.*s", LCD_COLS, LCD_COLS, l1 ? l1 : "");
+  lcd.setCursor(0, 0); lcd.print(buf);
+  snprintf(buf, sizeof(buf), "%-*.*s", LCD_COLS, LCD_COLS, l2 ? l2 : "");
+  lcd.setCursor(0, 1); lcd.print(buf);
+}
+
 static bool runProvisioningFlow() {
   Serial.println("[PROVISION] Portal: Wi-Fi + ma kich hoat (+ ma don ship tuy chon).");
+  lcdMsg("Cho cau hinh", AP_SSID);   // hien ten AP de nguoi dung ket noi vao portal
   startWebPortal();
 
   while (!web_config_done) {
@@ -696,22 +707,32 @@ static bool runProvisioningFlow() {
   // Nguoi dung co the nhap ma don ship o buoc kich hoat (tuy chon) -> luu tam truoc khi verify xoa.
   String desiredShipment = String(credentials.shipment_code);
 
+  lcdMsg("Kich hoat...", "Ket noi WiFi..");
   if (!connectToWiFi(credentials.wifi_ssid, credentials.wifi_pass)) {
     Serial.println("[PROVISION] Khong ket noi duoc Wi-Fi sau khi nhap portal.");
+    lcdMsg("Ket noi that bai", "Kiem tra WiFi");
+    delay(2500);
     return false;
   }
 
   String pubKeyPem;
   if (!generateECCKeyPair(credentials.private_key_raw, pubKeyPem)) {
     Serial.println("[PROVISION] Tao key pair that bai.");
+    lcdMsg("Loi tao khoa", "Thu lai");
+    delay(2000);
     return false;
   }
 
   Serial.println("[PROVISION] Pha 1 - kich hoat thiet bi...");
+  lcdMsg("Dang kich hoat", "Goi server...");
   if (!callAPIVerify(pubKeyPem)) {
     Serial.println("[PROVISION] Kich hoat that bai. Kiem tra ma kich hoat hoac backend.");
+    // WiFi da noi nhung khong goi duoc backend (mat internet) hoac ma kich hoat sai.
+    lcdMsg("Kich hoat loi", "No net / Ma sai");
+    delay(2500);
     return false;
   }
+  lcdMsg("Kich hoat OK", "Thiet bi san sang");
 
   safeCopyChars(credentials.device_id, sizeof(credentials.device_id), device_id);
   credentials.has_private_key = true;
@@ -775,8 +796,10 @@ void setup() {
   } else {
     Serial.println("[BOOT] Da co thong tin provision trong NVS.");
     startWebPortal();   // giu AP + trang monitor de quan ly / gan-doi don ship / reset
+    lcdMsg("Ket noi WiFi..", credentials.wifi_ssid);
     if (!connectToWiFi(credentials.wifi_ssid, credentials.wifi_pass)) {
       Serial.println("[BOOT] Mat ket noi Wi-Fi, thiet bi se tiep tuc thu lai trong vong lap.");
+      lcdMsg("Mat WiFi", "Dang thu lai...");
     }
   }
 
