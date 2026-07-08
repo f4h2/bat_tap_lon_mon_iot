@@ -126,7 +126,7 @@
     try { new QRCode(el, { text: String(text), width: size || 180, height: size || 180, correctLevel: QRCode.CorrectLevel.M }); }
     catch (e) { el.textContent = "Không tạo được QR"; }
   }
-  function showQrModal(title, text, hint, deepLink) {
+  function showQrModal(title, text, hint, deepLink, watch) {
     const qrBox = h("div", { class: "qr-box" });
     const codeEl = h("div", { class: "mono", style: "margin-top:12px;font-size:15px;font-weight:800;word-break:break-all" }, text);
     // Mặc định: QR "mở nhanh" (cho ESP32/điện thoại quét mở portal). QR mã chỉ là tùy chọn phụ.
@@ -151,8 +151,21 @@
     } else {
       kids.push(h("p", { class: "page-sub", style: "margin-top:10px" }, hint || "Quét bằng camera điện thoại để đọc mã, rồi nhập vào portal ESP32."));
     }
-    showModal(title, h("div", { style: "text-align:center;white-space:pre-line" }, kids));
+    // Chờ backend xác nhận (kích hoạt / gắn đơn) rồi tự đóng modal + chạy onHit.
+    if (watch) {
+      kids.push(h("div", { style: "margin-top:12px;display:flex;align-items:center;gap:8px;justify-content:center;color:#1f9d55;font-weight:700;font-size:12px" },
+        [h("span", { class: "pulse" }), watch.waitText || "Đang chờ… modal tự đóng khi hoàn tất"]));
+    }
+    const close = showModal(title, h("div", { style: "text-align:center;white-space:pre-line" }, kids));
     apply();
+    if (watch) {
+      const timer = setInterval(async () => {
+        if (!document.body.contains(qrBox)) { clearInterval(timer); return; } // modal đã đóng tay
+        let hit = null;
+        try { hit = await watch.poll(); } catch (_) { return; }
+        if (hit) { clearInterval(timer); close(); try { watch.onHit(hit); } catch (_) {} }
+      }, watch.intervalMs || 2500);
+    }
   }
 
   // Điều hướng sang màn Giám sát cho 1 đơn ship (đóng modal nếu đang mở).
@@ -797,7 +810,21 @@
           }, "🔎 Giám sát"),
           h("button", {
             class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px;margin-right:6px",
-            onclick: () => showQrModal("QR đơn ship " + s.shipmentCode, s.shipmentCode, null, "http://192.168.4.1/monitor?ship=" + encodeURIComponent(s.shipmentCode)),
+            onclick: () => {
+              let baseline = null; // tick đầu chụp mốc thiết bị đang gắn, chỉ báo khi có thiết bị MỚI
+              showQrModal("QR đơn ship " + s.shipmentCode, s.shipmentCode, null, "http://192.168.4.1/monitor?ship=" + encodeURIComponent(s.shipmentCode), {
+                waitText: "Đang chờ thiết bị gắn vào đơn… tự chuyển sang Giám sát khi xong",
+                poll: async () => {
+                  const cur = new Set((await Api.listDevices())
+                    .filter((d) => d.shipmentCode === s.shipmentCode && String(d.status) === "ACTIVE")
+                    .map((d) => d.deviceId));
+                  if (baseline === null) { baseline = cur; return null; }
+                  for (const id of cur) if (!baseline.has(id)) return id;
+                  return null;
+                },
+                onHit: (deviceId) => { toast("Thiết bị " + short(deviceId, 10) + " đã gắn — chuyển sang Giám sát", "ok"); goToMonitor(s.shipmentCode); },
+              });
+            },
           }, "QR gắn đơn"),
           s.status === 'ACTIVE' ? h("button", {
             class: "btn btn-ghost",
@@ -991,7 +1018,14 @@
         h("td", null, fmtDateTime(c.expiresAt)),
         h("td", null, c.usedByDeviceId ? h("span", { class: "mono" }, short(c.usedByDeviceId, 14)) : "—"),
         h("td", null, codeDisplayStatus(c) === "UNUSED"
-          ? h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px", onclick: () => showQrModal("QR mã kích hoạt", c.verifyCode, null, "http://192.168.4.1/?vcode=" + encodeURIComponent(c.verifyCode)) }, "QR")
+          ? h("button", { class: "btn btn-ghost", style: "font-size:11px;padding:2px 8px", onclick: () => showQrModal("QR mã kích hoạt", c.verifyCode, null, "http://192.168.4.1/?vcode=" + encodeURIComponent(c.verifyCode), {
+              waitText: "Đang chờ thiết bị kích hoạt bằng mã này… tự đóng khi xong",
+              poll: async () => {
+                const found = (await Api.listVerifyCodes()).find((x) => x.verifyCode === c.verifyCode);
+                return found && found.status === "USED" ? (found.usedByDeviceId || true) : null;
+              },
+              onHit: (deviceId) => { toast("Thiết bị " + (typeof deviceId === "string" ? short(deviceId, 10) : "") + " đã kích hoạt", "ok"); viewCodes(); },
+            }) }, "QR")
           : "—"),
       ]))),
     ]));
