@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Cold Chain IoT — Slide trình bày</title>
+<style>
+  :root{
+    --ink:#0e2233; --ink-soft:#355a79; --teal:#1d6f8d; --teal-deep:#14506a;
+    --ice:#eaf3f8; --ground:#f7fbfd; --card:#ffffff; --line:#cfe0ec;
+    --ok:#1f9d55; --warn:#d97706; --err:#c53030;
+    --mono:"SF Mono","Cascadia Code",Consolas,"Liberation Mono",monospace;
+    --disp:"Avenir Next","Segoe UI Variable Display","Segoe UI",system-ui,sans-serif;
+  }
+  html,body{height:100%;}
+  body{margin:0;background:var(--ground);color:var(--ink);font-family:var(--disp);overflow:hidden;}
+  .deck{height:100vh;display:flex;flex-direction:column;}
+  .stage{flex:1;position:relative;min-height:0;}
+  .slide{position:absolute;inset:0;padding:44px 64px 36px;display:none;flex-direction:column;overflow-y:auto;}
+  .slide.active{display:flex;}
+  .eyebrow{font-size:13px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--teal);margin-bottom:8px;}
+  h1{font-size:clamp(30px,4.4vw,52px);line-height:1.12;margin:0 0 10px;text-wrap:balance;font-weight:700;}
+  h2{font-size:clamp(24px,3vw,36px);margin:0 0 6px;text-wrap:balance;font-weight:700;}
+  .sub{color:var(--ink-soft);font-size:clamp(14px,1.5vw,17px);margin:0 0 20px;max-width:75ch;}
+  .grow{flex:1;min-height:0;}
+  ul{margin:0;padding-left:20px;line-height:1.8;font-size:clamp(13px,1.35vw,16.5px);}
+  li{margin-bottom:6px;}
+  li b{color:var(--teal-deep);}
+  code{font-family:var(--mono);font-size:.88em;background:var(--ice);padding:1px 6px;border-radius:5px;white-space:nowrap;}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:start;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px;}
+  .card h3{margin:0 0 8px;font-size:15px;color:var(--teal-deep);letter-spacing:.04em;text-transform:uppercase;}
+  table{border-collapse:collapse;width:100%;font-size:clamp(12px,1.3vw,15.5px);}
+  th{text-align:left;color:var(--teal-deep);font-size:12px;letter-spacing:.08em;text-transform:uppercase;border-bottom:2px solid var(--teal);padding:6px 10px;}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.55;}
+  .pill{display:inline-block;background:var(--ice);color:var(--teal-deep);border:1px solid var(--line);border-radius:999px;padding:3px 12px;font-size:12.5px;font-weight:600;margin:0 6px 6px 0;}
+  .foot{display:flex;align-items:center;justify-content:space-between;padding:12px 28px;border-top:1px solid var(--line);background:var(--card);}
+  .foot .title{font-size:12.5px;color:var(--ink-soft);letter-spacing:.06em;}
+  .nav{display:flex;align-items:center;gap:14px;}
+  .nav button{font:inherit;font-weight:700;background:var(--ice);color:var(--teal-deep);border:1px solid var(--line);border-radius:8px;padding:6px 16px;cursor:pointer;}
+  .nav button:hover{background:var(--teal);color:#fff;}
+  .nav button:focus-visible{outline:2px solid var(--teal);outline-offset:2px;}
+  .count{font-variant-numeric:tabular-nums;font-size:13px;color:var(--ink-soft);min-width:52px;text-align:center;}
+  .bar{height:4px;background:var(--ice);}
+  .bar i{display:block;height:100%;background:var(--teal);transition:width .25s;}
+
+  /* ---- sơ đồ kiến trúc ngang ---- */
+  .arch{display:flex;align-items:stretch;margin-top:10px;}
+  .node{flex:1;background:var(--card);border:2px solid var(--teal);border-radius:14px;padding:14px 16px;text-align:center;}
+  .node h4{margin:0 0 6px;font-size:clamp(14px,1.5vw,18px);}
+  .node p{margin:0;font-size:clamp(11px,1.15vw,14px);color:var(--ink-soft);line-height:1.6;}
+  .link{display:flex;flex-direction:column;justify-content:center;align-items:center;min-width:110px;padding:0 6px;gap:4px;}
+  .link .arrow{font-size:22px;color:var(--teal);}
+  .link .proto{font-family:var(--mono);font-size:11px;color:var(--ink-soft);text-align:center;line-height:1.5;}
+  .archrow2{display:flex;justify-content:center;gap:40px;margin-top:16px;}
+  .subnode{background:var(--ice);border:1.5px dashed var(--teal);border-radius:12px;padding:10px 18px;font-size:13px;color:var(--ink-soft);text-align:center;}
+  .subnode b{color:var(--teal-deep);display:block;margin-bottom:3px;}
+
+  /* ---- sequence diagram (3 lane) ---- */
+  .seq{display:grid;grid-template-columns:170px 1fr;gap:0;margin-top:6px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card);}
+  .seq .head{display:contents;}
+  .seq .lanehead{background:var(--ice);padding:10px;text-align:center;font-weight:700;font-size:clamp(12px,1.3vw,15px);color:var(--teal-deep);border-bottom:2px solid var(--teal);}
+  .seq .phase{background:var(--ice);padding:8px 12px;font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--teal-deep);border-top:1px solid var(--line);display:flex;align-items:center;}
+  .msgs{border-top:1px solid var(--line);padding:10px 14px;display:flex;flex-direction:column;gap:8px;}
+  .msg{display:flex;align-items:center;gap:10px;font-size:clamp(12px,1.25vw,14.5px);}
+  .msg .who{font-weight:700;color:var(--teal-deep);white-space:nowrap;font-size:.92em;}
+  .msg .arr{color:var(--teal);font-weight:700;}
+  .msg .what{color:var(--ink);}
+  .msg .what code{font-size:.85em;}
+  .msg .ret .arr{color:var(--ok);}
+
+  /* ---- pipeline flow ---- */
+  .pipe{display:flex;align-items:stretch;gap:0;margin-top:14px;flex-wrap:wrap;row-gap:18px;}
+  .pnode{background:var(--card);border:2px solid var(--teal);border-radius:12px;padding:12px 14px;text-align:center;flex:1;min-width:130px;}
+  .pnode h5{margin:0 0 4px;font-size:clamp(12.5px,1.3vw,15px);}
+  .pnode p{margin:0;font-size:clamp(10.5px,1.05vw,12.5px);color:var(--ink-soft);line-height:1.5;}
+  .pnode.err{border-color:var(--err);}
+  .pnode.ok{border-color:var(--ok);}
+  .parr{display:flex;align-items:center;padding:0 8px;color:var(--teal);font-size:20px;font-weight:700;}
+  .pveto{margin-top:10px;text-align:center;font-size:clamp(11.5px,1.2vw,13.5px);color:var(--err);font-weight:600;}
+
+  /* ---- hash chain ---- */
+  .chain{display:flex;align-items:center;gap:0;margin-top:14px;}
+  .block{flex:1;background:var(--card);border:2px solid var(--teal);border-radius:12px;padding:10px 12px;text-align:center;}
+  .block.bad{border-color:var(--err);background:#fdecec;}
+  .block h5{margin:0 0 4px;font-size:13.5px;}
+  .block p{margin:0;font-family:var(--mono);font-size:10.5px;color:var(--ink-soft);line-height:1.6;}
+  .block.bad p,.block.bad h5{color:var(--err);}
+  .chlink{padding:0 6px;color:var(--teal);font-weight:700;font-size:16px;white-space:nowrap;}
+  .chlink small{display:block;font-family:var(--mono);font-size:9.5px;color:var(--ink-soft);}
+  .anchor{margin-top:14px;display:flex;justify-content:center;}
+  .anchor .subnode{max-width:640px;}
+
+  /* title slide */
+  .s-title{justify-content:center;background:radial-gradient(1100px 500px at 85% -10%, var(--ice), transparent 70%);}
+  .s-title .badges{margin-top:26px;}
+  .kv{font-family:var(--mono);font-size:13px;color:var(--ink-soft);margin-top:34px;line-height:2;}
+  .snow{position:absolute;top:44px;right:64px;font-size:120px;opacity:.13;pointer-events:none;}
+  @media (prefers-reduced-motion: reduce){ .bar i{transition:none;} }
+</style>
+</head>
+<body>
+<div class="deck">
+<div class="stage">
+
+<!-- 1. Bìa -->
+<section class="slide s-title active">
+  <div class="eyebrow">Bài tập lớn môn IoT</div>
+  <h1>Hệ thống IoT giám sát chuỗi lạnh<br>(Cold Chain Monitoring)</h1>
+  <p class="sub">Giám sát nhiệt độ – độ ẩm – GPS trên xe lạnh, với <b>xác thực thiết bị</b> và <b>chống sửa đổi dữ liệu</b> (ký số ECDSA, hash chain, chống replay).</p>
+  <div class="badges">
+    <span class="pill">ESP32 + DHT + GPS</span><span class="pill">Spring Boot 3 · Java 21</span>
+    <span class="pill">PostgreSQL + Flyway</span><span class="pill">Web Dashboard SPA</span>
+    <span class="pill">MapLibre GL · Three.js · OSRM</span><span class="pill">Docker Compose</span>
+  </div>
+  <div class="kv">Sinh viên: Trần Bá Đạt &nbsp;·&nbsp; Repo: bat_tap_lon_mon_iot</div>
+</section>
+
+<!-- 2. Phân công nhiệm vụ -->
+<section class="slide">
+  <div class="eyebrow">Nhóm thực hiện</div>
+  <h2>Bảng phân công nhiệm vụ</h2>
+  <div class="grow" style="overflow-x:auto;margin-top:12px">
+    <table>
+      <thead><tr><th style="width:26%">Thành viên</th><th style="width:34%">Nhiệm vụ</th><th>Sản phẩm</th></tr></thead>
+      <tbody>
+        <tr><td><b>Trần Bá Đạt</b></td><td>Backend server + bảo mật (provisioning, verify chữ ký, chống replay, hash chain, cảnh báo)</td><td>Spring Boot API, PostgreSQL, Docker Compose, deploy iot.tranbadat.vn</td></tr>
+        <tr><td><b>Thành viên 2</b></td><td>Firmware thiết bị IoT (đọc cảm biến, sinh khóa ECC, ký ECDSA, Web Portal cấu hình)</td><td>Firmware ESP32, mạch ESP32 + DHT + GPS, bộ script giả lập</td></tr>
+        <tr><td><b>Thành viên 3</b></td><td>Web Admin Dashboard (giám sát realtime, lộ trình 3D, màn toàn vẹn)</td><td>SPA dashboard 7 màn hình</td></tr>
+        <tr><td><b>Thành viên 4</b></td><td>Tài liệu, kiểm thử &amp; demo (sequence diagram, kịch bản demo, slide)</td><td>Tài liệu docs/, kịch bản demo, slide thuyết trình</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 3. Bài toán -->
+<section class="slide">
+  <div class="eyebrow">Đặt vấn đề</div>
+  <h2>Bài toán &amp; mục tiêu</h2>
+  <div class="cols grow" style="margin-top:14px">
+    <div class="card">
+      <h3>Vấn đề</h3>
+      <ul>
+        <li>Hàng lạnh hỏng nếu vượt ngưỡng nhiệt khi vận chuyển.</li>
+        <li>Thiết bị đo có thể bị <b>giả mạo</b>.</li>
+        <li>Dữ liệu lịch sử có thể bị <b>sửa trong DB</b> để che vi phạm.</li>
+        <li>Request cũ có thể bị <b>replay</b>.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Mục tiêu</h3>
+      <ul>
+        <li>Thu thập nhiệt độ, độ ẩm, GPS mỗi 10 giây.</li>
+        <li>Chỉ nhận dữ liệu từ thiết bị <b>đã xác thực</b>.</li>
+        <li>Phát hiện mọi hành vi <b>sửa / xóa dữ liệu</b>.</li>
+        <li>Dashboard giám sát realtime + mô phỏng lộ trình 3D.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 3. YC1: kiến trúc -->
+<section class="slide">
+  <div class="eyebrow">Yêu cầu 1 · Kiến trúc tổng quan</div>
+  <h2>Sơ đồ kiến trúc hệ thống</h2>
+  <p class="sub">Kiến trúc 3 lớp: thiết bị hiện trường → backend trung tâm → giao diện quản trị.</p>
+  <div class="arch">
+    <div class="node">
+      <h4>🌡 Thiết bị IoT — ESP32</h4>
+      <p>Cảm biến DHT + GPS<br>Sinh khóa ECC P-256, ký ECDSA<br>Web Portal cấu hình<br><i>Kèm simulator khi không có mạch</i></p>
+    </div>
+    <div class="link"><span class="arrow">↔</span><span class="proto">HTTP/REST · JSON<br>headers ký số</span></div>
+    <div class="node">
+      <h4>🖥 Backend — Spring Boot 3</h4>
+      <p>Provisioning · verify chữ ký<br>Chống replay · hash chain<br>Cảnh báo ngưỡng · REST API</p>
+    </div>
+    <div class="link"><span class="arrow">↔</span><span class="proto">JPA / JDBC<br>Flyway</span></div>
+    <div class="node">
+      <h4>🗄 PostgreSQL</h4>
+      <p>devices · shipments · telemetry<br>alerts · nonces · anchors<br>Docker Compose</p>
+    </div>
+  </div>
+  <div class="archrow2">
+    <div class="subnode"><b>💻 Admin Dashboard (SPA)</b>Phục vụ tĩnh cùng origin từ backend · REST /api/admin/*</div>
+    <div class="subnode"><b>🗺 Dịch vụ ngoài</b>Tile OpenStreetMap · định tuyến OSRM (có fallback offline)</div>
+  </div>
+</section>
+
+<!-- 4. YC1: thành phần & công nghệ -->
+<section class="slide">
+  <div class="eyebrow">Yêu cầu 1 · Kiến trúc tổng quan</div>
+  <h2>Các thành phần &amp; công nghệ</h2>
+  <div class="grow" style="overflow-x:auto;margin-top:10px">
+    <table>
+      <thead><tr><th>Thành phần</th><th>Vai trò</th><th>Công nghệ</th></tr></thead>
+      <tbody>
+        <tr><td><b>Thiết bị IoT</b></td><td>Đo &amp; ký telemetry mỗi 10s, portal cấu hình</td><td>ESP32 (Arduino C++), DHT, TinyGPS++, mbedTLS</td></tr>
+        <tr><td><b>Backend server</b></td><td>Xác thực, ingest, hash chain, cảnh báo</td><td>Java 21, Spring Boot 3.3, JPA, Swagger</td></tr>
+        <tr><td><b>CSDL</b></td><td>Lưu toàn bộ dữ liệu + audit</td><td>PostgreSQL, Flyway, pgAdmin</td></tr>
+        <tr><td><b>Web App</b></td><td>7 màn quản trị &amp; giám sát</td><td>SPA HTML/CSS/JS, Leaflet, MapLibre GL + Three.js</td></tr>
+        <tr><td><b>Hạ tầng</b></td><td>Chạy toàn bộ một lệnh, deploy thật</td><td>Docker Compose, Nginx (iot.tranbadat.vn)</td></tr>
+        <tr><td><b>Giả lập</b></td><td>Demo không cần phần cứng</td><td>Bash + OpenSSL, Python portal simulator</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 5. YC1: flow giao tiếp -->
+<section class="slide">
+  <div class="eyebrow">Yêu cầu 1 · Kiến trúc tổng quan</div>
+  <h2>Luồng giao tiếp — 3 giai đoạn</h2>
+  <div class="seq grow" style="margin-top:10px">
+    <div class="phase">GĐ 1 · Chuẩn bị</div>
+    <div class="msgs">
+      <div class="msg"><span class="who">Admin</span><span class="arr">→</span><span class="what">Backend: <code>POST /api/admin/devices/generate-code</code> — sinh mã kích hoạt (kèm QR)</span></div>
+    </div>
+    <div class="phase">GĐ 2 · Provisioning<br>(một lần)</div>
+    <div class="msgs">
+      <div class="msg"><span class="who">ESP32</span><span class="arr">→</span><span class="what">Backend: <code>POST /api/devices/verify</code> — gửi <b>public key</b> + verify code</span></div>
+      <div class="msg ret"><span class="who">Backend</span><span class="arr">←</span><span class="what">trả <code>api_key</code> <b>đúng 1 lần</b>; DB chỉ lưu HMAC(api_key)</span></div>
+      <div class="msg"><span class="who">ESP32</span><span class="arr">→</span><span class="what">Backend: <code>POST /api/devices/bind</code> — quét QR gắn đơn ship (đổi được nhiều lần)</span></div>
+    </div>
+    <div class="phase">GĐ 3 · Vận hành<br>(mỗi 10 giây)</div>
+    <div class="msgs">
+      <div class="msg"><span class="who">ESP32</span><span class="arr">→</span><span class="what">Backend: <code>POST /api/telemetry</code> — body JSON + headers <code>X-Signature, X-Nonce, X-Timestamp</code></span></div>
+      <div class="msg ret"><span class="who">Backend</span><span class="arr">←</span><span class="what">verify chữ ký → lưu vào hash chain → sinh cảnh báo nếu vượt ngưỡng</span></div>
+      <div class="msg"><span class="who">Dashboard</span><span class="arr">→</span><span class="what">Backend: <code>GET /api/shipments/{code}/telemetry</code>, <code>/alerts</code> — poll mỗi 5 giây</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- 6. YC2: backend pipeline -->
+<section class="slide">
+  <div class="eyebrow">Yêu cầu 2 · Triển khai xây dựng</div>
+  <h2>Backend — pipeline xử lý telemetry</h2>
+  <p class="sub">Mỗi request đi qua chuỗi kiểm tra; rớt bước nào bị từ chối ngay tại bước đó.</p>
+  <div class="pipe">
+    <div class="pnode"><h5>1 · Nhận request</h5><p>Rate limit<br>Bean Validation input</p></div>
+    <div class="parr">→</div>
+    <div class="pnode"><h5>2 · Xác thực thiết bị</h5><p>Device-Id + HMAC(api_key)<br>đã gắn đơn ship?</p></div>
+    <div class="parr">→</div>
+    <div class="pnode"><h5>3 · Chống replay</h5><p>Timestamp lệch ≤ 5 phút<br>Nonce chưa dùng</p></div>
+    <div class="parr">→</div>
+    <div class="pnode"><h5>4 · Verify chữ ký</h5><p>ECDSA P-256 trên<br>canonical request</p></div>
+    <div class="parr">→</div>
+    <div class="pnode ok"><h5>5 · Lưu + hash chain</h5><p>record_hash nối<br>previous_hash (HMAC)</p></div>
+    <div class="parr">→</div>
+    <div class="pnode ok"><h5>6 · Cảnh báo</h5><p>So ngưỡng nhiệt/ẩm<br>pin yếu</p></div>
+  </div>
+  <div class="pveto">✗ Sai ở bước 1–4 → trả lỗi 4xx, không ghi dữ liệu · mọi thao tác đều vào audit log</div>
+  <div class="grow"></div>
+  <ul style="margin-top:14px">
+    <li><b>Nghiệp vụ:</b> quản lý chuyến hàng theo ngưỡng riêng từng loại hàng · vòng đời thiết bị 2 pha (kích hoạt 1 lần → gắn/đổi đơn ship nhiều lần) · API phân trang + Swagger.</li>
+  </ul>
+</section>
+
+<!-- 7. YC2: web app -->
+<section class="slide">
+  <div class="eyebrow">Yêu cầu 2 · Triển khai xây dựng</div>
+  <h2>Web App — Admin Dashboard</h2>
+  <p class="sub">SPA tĩnh cùng origin với backend — mở <code>http://localhost:8080/</code> là dùng, không cần build.</p>
+  <div class="cols grow">
+    <div class="card">
+      <h3>Màn hình nghiệp vụ</h3>
+      <ul>
+        <li><b>Tổng quan:</b> KPI toàn hệ thống.</li>
+        <li><b>Chuyến hàng · Mã kích hoạt · Thiết bị:</b> CRUD, QR, gắn/bỏ gắn.</li>
+        <li><b>Giám sát</b> (làm mới 5s): biểu đồ nhiệt/ẩm, cảnh báo, bảng telemetry phân trang.</li>
+        <li><b>Toàn vẹn:</b> kiểm chứng hash chain + điểm đối soát.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Lộ trình di chuyển (3D)</h3>
+      <ul>
+        <li>Mở từ màn Giám sát, gắn với đơn ship đang xem.</li>
+        <li>Bản đồ OSM nghiêng 3D, xe tải 3D chạy theo tuyến OSRM thật (fallback mô phỏng khi mất mạng).</li>
+        <li>Camera bám xe · tiến độ + ETA · đường đã đi đổi màu.</li>
+        <li>Phát lại nhiệt/ẩm thật của chuyến, cảnh báo vượt 8°C, nhật ký hành trình.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- 8. YC2: thiết bị flow -->
+<section class="slide">
+  <div class="eyebrow">Yêu cầu 2 · Triển khai xây dựng</div>
+  <h2>Thiết bị IoT — vòng đời ESP32</h2>
+  <div class="pipe" style="margin-top:18px">
+    <div class="pnode"><h5>1 · Cấp nguồn lần đầu</h5><p>Phát WiFi AP<br><code>ESP32-IoT-Setup</code></p></div>
+    <div class="parr">→</div>
+    <div class="pnode"><h5>2 · Web Portal</h5><p><code>192.168.4.1</code><br>nhập WiFi + verify code</p></div>
+    <div class="parr">→</div>
+    <div class="pnode"><h5>3 · Sinh khóa ECC</h5><p>P-256 trong thiết bị<br>private key không rời ESP32</p></div>
+    <div class="parr">→</div>
+    <div class="pnode"><h5>4 · Provisioning</h5><p>gửi public key<br>nhận api_key</p></div>
+    <div class="parr">→</div>
+    <div class="pnode ok"><h5>5 · Vận hành</h5><p>đo DHT + GPS, ký ECDSA<br>gửi telemetry mỗi 10s</p></div>
+  </div>
+  <div class="grow"></div>
+  <div class="cols" style="margin-top:16px">
+    <div class="card"><h3>Phần cứng thật</h3>
+      <ul><li>ESP32 + DHT + module GPS; trang <code>/monitor</code> realtime, gắn/đổi đơn ship, reset.</li></ul>
+    </div>
+    <div class="card"><h3>Giả lập (không cần mạch)</h3>
+      <ul><li><code>demo-flow.sh</code> chạy trọn vòng đời · <code>seed-demo.sh</code> bơm lộ trình + dữ liệu vượt ngưỡng · <code>portal_sim.py</code>.</li></ul>
+    </div>
+  </div>
+</section>
+
+<!-- 9. YC3: xác thực -->
+<section class="slide">
+  <div class="eyebrow">Yêu cầu 3 · Kỹ thuật bảo mật</div>
+  <h2>Lớp 1 — Xác thực thiết bị</h2>
+  <p class="sub">Thiết bị giả không có verify code để đăng ký, không có private key để ký request.</p>
+  <div class="pipe" style="margin-top:8px">
+    <div class="pnode"><h5>Verify code<br>dùng 1 lần</h5><p>admin cấp, có hạn dùng<br>chặn đăng ký trái phép</p></div>
+    <div class="parr">→</div>
+    <div class="pnode"><h5>Khóa ECC sinh<br>tại thiết bị</h5><p>chỉ public key lên server<br>không thể nhân bản</p></div>
+    <div class="parr">→</div>
+    <div class="pnode"><h5>API key<br>không lưu plaintext</h5><p>DB chỉ lưu HMAC + pepper<br>lộ DB không lộ key</p></div>
+    <div class="parr">→</div>
+    <div class="pnode ok"><h5>Ký ECDSA<br>từng request</h5><p>canonical = method + path +<br>id + time + nonce + hash(body)</p></div>
+  </div>
+  <div class="grow"></div>
+  <ul style="margin-top:16px">
+    <li><b>Phòng thủ ở biên:</b> rate limit · validate toàn bộ input · audit log · lỗi trả về không lộ chi tiết nội bộ.</li>
+  </ul>
+</section>
+
+<!-- 10. YC3: toàn vẹn -->
+<section class="slide">
+  <div class="eyebrow">Yêu cầu 3 · Kỹ thuật bảo mật</div>
+  <h2>Lớp 2 — Chống replay &amp; chống sửa đổi</h2>
+  <p class="sub">Mỗi bản ghi móc vào bản ghi trước bằng HMAC — sửa 1 dòng làm lệch cả chuỗi phía sau.</p>
+  <div class="chain">
+    <div class="block"><h5>Bản ghi #1</h5><p>payload_hash<br>signature<br><b>record_hash₁</b></p></div>
+    <div class="chlink">→<small>prev = hash₁</small></div>
+    <div class="block"><h5>Bản ghi #2</h5><p>payload_hash<br>signature<br><b>record_hash₂</b></p></div>
+    <div class="chlink">→<small>prev = hash₂</small></div>
+    <div class="block bad"><h5>Bản ghi #3 (bị sửa)</h5><p>hash tính lại ≠ hash lưu<br>⚠ tampered</p></div>
+    <div class="chlink">→<small>lệch dây chuyền</small></div>
+    <div class="block bad"><h5>Bản ghi #4…</h5><p>previous_hash không khớp<br>⚠ cả đuôi chuỗi lệch</p></div>
+  </div>
+  <div class="anchor">
+    <div class="subnode"><b>Điểm đối soát (integrity anchor)</b>Head hash công bố định kỳ ra sổ append-only + file ngoài DB → xóa cả chuỗi cũng bị phát hiện. Khóa HMAC nằm ngoài DB.</div>
+  </div>
+  <div class="grow"></div>
+  <div class="cols" style="margin-top:14px">
+    <div class="card"><h3>Chống replay</h3><ul><li>Timestamp lệch &gt; 5 phút → từ chối · nonce dùng 1 lần → gửi lại request cũ bị chặn.</li></ul></div>
+    <div class="card"><h3>Demo phản chứng</h3><ul><li>Sửa 1 dòng trong PostgreSQL → màn Toàn vẹn &amp; Giám sát lập tức tô đỏ ⚠ "Đã sửa".</li></ul></div>
+  </div>
+</section>
+
+<!-- 11. Kết luận -->
+<section class="slide">
+  <div class="eyebrow">Tổng kết</div>
+  <h2>Demo &amp; kết luận</h2>
+  <div class="cols grow" style="margin-top:12px">
+    <div class="card">
+      <h3>Kịch bản demo ≈ 5 phút</h3>
+      <ul>
+        <li><code>docker compose up -d --build</code></li>
+        <li>Sinh mã kích hoạt → provisioning (ESP32 / script).</li>
+        <li><code>seed-demo.sh</code> → xem Giám sát + Lộ trình 3D.</li>
+        <li>Sửa 1 bản ghi trong DB → hệ thống phát hiện tampered.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Kết quả theo yêu cầu</h3>
+      <ul>
+        <li><b>YC1</b> — kiến trúc 3 lớp, REST/JSON chuẩn hóa, sơ đồ luồng đầy đủ.</li>
+        <li><b>YC2</b> — backend + web dashboard 7 màn + firmware ESP32 + bộ giả lập.</li>
+        <li><b>YC3</b> — 8 kỹ thuật: verify code, ECDSA, HMAC api_key, timestamp, nonce, hash chain, anchor, rate limit.</li>
+        <li>Deploy thật tại <code>iot.tranbadat.vn</code>.</li>
+      </ul>
+      </div>
+  </div>
+</section>
+
+</div>
+<div class="bar"><i id="bar"></i></div>
+<div class="foot">
+  <span class="title">Cold Chain IoT — giám sát chuỗi lạnh có xác thực &amp; chống sửa đổi dữ liệu · <a href="/" style="color:var(--teal)">về Dashboard</a></span>
+  <div class="nav">
+    <button id="prev" aria-label="Slide trước">‹ Trước</button>
+    <span class="count" id="count">1 / 11</span>
+    <button id="next" aria-label="Slide sau">Sau ›</button>
+  </div>
+</div>
+</div>
+
+<script>
+  const slides = [...document.querySelectorAll(".slide")];
+  let i = 0;
+  const show = (n) => {
+    i = Math.max(0, Math.min(slides.length - 1, n));
+    slides.forEach((s, k) => s.classList.toggle("active", k === i));
+    document.getElementById("count").textContent = (i + 1) + " / " + slides.length;
+    document.getElementById("bar").style.width = ((i + 1) / slides.length * 100) + "%";
+  };
+  document.getElementById("prev").addEventListener("click", () => show(i - 1));
+  document.getElementById("next").addEventListener("click", () => show(i + 1));
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowRight" || e.key === "PageDown" || e.key === " ") show(i + 1);
+    if (e.key === "ArrowLeft" || e.key === "PageUp") show(i - 1);
+    if (e.key === "Home") show(0);
+    if (e.key === "End") show(slides.length - 1);
+  });
+  show(0);
+</script>
+</body>
+</html>
